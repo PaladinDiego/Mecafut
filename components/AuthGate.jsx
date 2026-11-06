@@ -184,6 +184,13 @@ export default function AuthGate({ children }) {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setCorreo("juan.mejia@unitec.edu.hn")}
+                      className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
+                    >
+                      👑🎓 Admin Docente
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setCorreo("jared.sauceda@unitec.edu")}
                       className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
                     >

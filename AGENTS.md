@@ -28,20 +28,21 @@
    - En entorno de desarrollo local (`NODE_ENV !== "production"`), el OTP se puede simular o autocompletar con `123456`.
    - En **Producción (Vercel)**, por seguridad **el código OTP nunca se muestra en pantalla**. Si se desea que el estudiante reciba el correo real, se debe configurar **EmailJS** (ver sección de credenciales).
 
-3. **Lista Blanca de Administradores Oficiales:**
+3. **Lista Blanca de Administradores Oficiales (9 Estudiantes + 2 Docentes):**
    - Hay **11 correos autorizados por defecto** en `lib/torneoConfig.js` y `firestore.rules`:
-     * `andresvalle@unitec.edu`
-     * `carlos.rubi@unitec.edu`
-     * `juan.mejia@unitec.edu.hn`
-     * `cristhyan.rivera@unitec.edu.hn`
-     * `joserodasgodoy@unitec.edu`
-     * `c.marcelo.al@unitec.edu`
-     * `cesar_lopez@unitec.edu`
-     * `adioyuela@unitec.edu`
-     * `maria_giron@unitec.edu`
-     * `dereck.beltrand@unitec.edu`
-     * `jalfaro@unitec.edu`
-   - Al iniciar sesión con cualquiera de estos correos, el sistema les otorga automáticamente el rol `admin` y la insignia `👑 ADMIN`, desbloqueando el panel `/admin`.
+     * `andresvalle@unitec.edu` (Estudiante)
+     * `carlos.rubi@unitec.edu` (Estudiante)
+     * `juan.mejia@unitec.edu.hn` (Docente - Ing. Juan Miguel Mejía)
+     * `cristhyan.rivera@unitec.edu.hn` (Docente - Ing. Cristhyan Rivera)
+     * `joserodasgodoy@unitec.edu` (Estudiante)
+     * `c.marcelo.al@unitec.edu` (Estudiante)
+     * `cesar_lopez@unitec.edu` (Estudiante)
+     * `adioyuela@unitec.edu` (Estudiante)
+     * `maria_giron@unitec.edu` (Estudiante)
+     * `dereck.beltrand@unitec.edu` (Estudiante)
+     * `jalfaro@unitec.edu` (Estudiante)
+   - Al iniciar sesión con cualquiera de estos correos, el sistema les otorga automáticamente el rol `admin` y acceso total al panel `/admin`.
+   - **Privilegios especiales para Docentes (`juan.mejia` y `cristhyan.rivera`):** Además de administrar el torneo, disfrutan de los privilegios docentes del reglamento: exención de carnet estudiantil obligatorio (`dni: "Exento (Docente)"`) y permiso reglamentario para jugar o asesorar a más de un equipo si los capitanes lo autorizan.
    - Se pueden agregar más administradores mediante la variable de entorno `NEXT_PUBLIC_ADMIN_EMAILS` (separados por coma) sin tocar el código.
 
 4. **Reglamento Interactivo en Inicio:**

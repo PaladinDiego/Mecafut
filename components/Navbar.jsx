@@ -151,7 +151,13 @@ export default function Navbar() {
                     {sesion.nombre || sesion.correo.split("@")[0]}
                   </strong>
                   <span className="text-[10px] text-blue-200 uppercase font-semibold block truncate">
-                    {sesion.rol === "admin" ? "👑 Admin" : sesion.rol === "docente" ? "🎓 Docente" : "⚽ Estudiante"}
+                    {sesion.rol === "admin" && sesion.esDocente
+                      ? "👑 Admin / 🎓 Docente"
+                      : sesion.rol === "admin"
+                      ? "👑 Admin"
+                      : sesion.rol === "docente"
+                      ? "🎓 Docente"
+                      : "⚽ Estudiante"}
                   </span>
                 </div>
                 <button

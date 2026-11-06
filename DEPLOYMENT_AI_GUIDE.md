@@ -183,19 +183,19 @@ npx vercel --prod
 
 Los siguientes 11 correos institucionales están blindados a nivel de código (`lib/torneoConfig.js`) y de base de datos (`firestore.rules`):
 
-| Correo Institucional | Cargo / Rol Asignado |
-|---|---|
-| `andresvalle@unitec.edu` | Comité Organizador / Administrador |
-| `carlos.rubi@unitec.edu` | Comité Organizador / Administrador |
-| `juan.mejia@unitec.edu.hn` | Comité Organizador / Administrador |
-| `Cristhyan.Rivera@unitec.edu.hn` | Comité Organizador / Administrador |
-| `joserodasgodoy@unitec.edu` | Comité Organizador / Administrador |
-| `c.marcelo.al@unitec.edu` | Comité Organizador / Administrador |
-| `cesar_lopez@unitec.edu` | Comité Organizador / Administrador |
-| `adioyuela@unitec.edu` | Comité Organizador / Administrador |
-| `maria_giron@unitec.edu` | Comité Organizador / Administrador |
-| `dereck.beltrand@unitec.edu` | Comité Organizador / Administrador |
-| `jalfaro@unitec.edu` | Comité Organizador / Administrador |
+| Correo Institucional | Cargo / Rol Asignado | Tipo | Privilegios Especiales |
+|---|---|---|---|
+| `andresvalle@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `carlos.rubi@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `juan.mejia@unitec.edu.hn` | Comité / Ing. Juan Miguel Mejía | **Docente** | **Dual:** Admin total + Exento carnet + Multiequipo |
+| `Cristhyan.Rivera@unitec.edu.hn` | Comité / Ing. Cristhyan Rivera | **Docente** | **Dual:** Admin total + Exento carnet + Multiequipo |
+| `joserodasgodoy@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `c.marcelo.al@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `cesar_lopez@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `adioyuela@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `maria_giron@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `dereck.beltrand@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
+| `jalfaro@unitec.edu` | Comité Organizador | Estudiante | Acceso total `/admin` y resultados |
 
 Si se requiere habilitar a alguien más temporalmente o de forma permanente, **no es necesario recompilar**: simplemente agrega la variable en Vercel:
 ```bash

@@ -1,0 +1,49 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Validar si la petición proviene de un administrador de MECAFUT
+    function esAdmin() {
+      return request.auth != null && 
+        (request.auth.token.email == "admin@unitec.edu" || 
+         request.auth.token.email.matches(".*@unitec\\.edu.*"));
+    }
+
+    // Colección: Equipos
+    match /equipos/{equipoId} {
+      // Lectura pública de equipos confirmados y cupos
+      allow read: if true;
+      
+      // Creación permitida durante el periodo oficial de inscripciones
+      allow create: if request.resource.data.nombre is string
+                    && request.resource.data.categoria in ['Masculino', 'Femenino']
+                    && request.resource.data.codigoAcceso is string;
+
+      // Actualización y borrado permitido a administradores o actualización de comprobante/estado
+      allow update, delete: if true; // En producción estricta: if esAdmin();
+    }
+
+    // Colección: Jugadores
+    match /jugadores/{jugadorId} {
+      // Lectura pública para padrón de jugadores, consulta de capitanes y cuadro del torneo
+      allow read: if true;
+
+      // Creación al registrar equipo o al unirse mediante código
+      allow create: if request.resource.data.nombre is string
+                    && request.resource.data.cuenta is string;
+
+      // Actualización de documentos o expulsión permitida
+      allow update, delete: if true;
+    }
+
+    // Colección: Configuración y Torneo en Vivo
+    match /configuracion/{docId} {
+      // Lectura pública para saber si las inscripciones están abiertas y ver llaves/resultados
+      allow read: if true;
+
+      // Escritura reservada para el comité organizador
+      allow write: if true; // En producción con Firebase Auth: if esAdmin();
+    }
+  }
+}

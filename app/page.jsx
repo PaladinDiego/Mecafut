@@ -14,7 +14,6 @@ import Link from "next/link";
 
 export default function Registro() {
   const [resumen, setResumen] = useState(null);
-  const [mostrarReglamento, setMostrarReglamento] = useState(false);
   const [rolSeleccionado, setRolSeleccionado] = useState("capitan"); // "capitan" | "jugador"
   const [sesion, setSesion] = useState(null);
 
@@ -42,17 +41,8 @@ export default function Registro() {
     color: ""
   });
 
-  // 9 jugadores extras (para sumar 10 en total con el Capitán)
-  const [jugadores, setJugadores] = useState(
-    Array(9).fill(null).map(() => ({
-      nombre: "",
-      cuenta: "",
-      correo: "",
-      dni: "",
-      carrera: CONFIG_TORNEO.carreras[0],
-      codigoClase: ""
-    }))
-  );
+  // Por defecto empezamos con lista vacía (Modo Fundación Ágil Recomendado)
+  const [jugadores, setJugadores] = useState([]);
 
   const [comprobante, setComprobante] = useState(null);
   const [comprobantePreview, setComprobantePreview] = useState(null);
@@ -119,7 +109,6 @@ export default function Registro() {
       if (primerLibre && !equipo.color) {
         setEquipo(prev => ({ ...prev, color: primerLibre.nombre }));
       }
-      // Si hay equipos registrados, seleccionar el primero para el jugador por conveniencia
       if (res.equiposActivos?.length > 0 && !codigoEquipoElegido) {
         setCodigoEquipoElegido(res.equiposActivos[0].codigoAcceso);
       }
@@ -141,6 +130,9 @@ export default function Registro() {
         cuenta: "",
         correo: "",
         dni: "",
+        tipoDocumento: "carnet",
+        fotoDocumento: null,
+        fotoDocumentoPreview: null,
         carrera: CONFIG_TORNEO.carreras[0],
         codigoClase: ""
       }]);
@@ -208,7 +200,7 @@ export default function Registro() {
         throw new Error("Por favor selecciona o ingresa el código del equipo al que deseas unirte.");
       }
 
-      const res = await agregarJugadorConCodigo(codigoEquipoElegido, jugadorSelf);
+      const res = await agregarJugadorConCodigo(codigoEquipoElegido, jugadorSelf, { esAutoRegistro: true });
       setResultadoJugador(res);
       setMensajeJugador("¡Te has unido exitosamente al equipo!");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -222,8 +214,8 @@ export default function Registro() {
   };
 
   const totalIntegrantesActual = 1 + jugadores.length;
-  const esEsperaEstudiantes = (resumen?.estudiantesOcupados || 0) >= CONFIG_TORNEO.cupos.estudiantes;
-  const esEsperaDocentes = (resumen?.docentesOcupados || 0) >= CONFIG_TORNEO.cupos.docentes;
+  const cupoMascLleno = (resumen?.masculinoOcupados || 0) >= CONFIG_TORNEO.cupos.masculino;
+  const cupoFemLleno = (resumen?.femeninoOcupados || 0) >= CONFIG_TORNEO.cupos.femenino;
 
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-20">
@@ -246,60 +238,58 @@ export default function Registro() {
           <span className="text-3xl block mb-2">🔒</span>
           <h2 className="text-xl font-bold text-red-900">Periodo de Inscripciones Cerrado</h2>
           <p className="text-sm text-red-700 mt-1 max-w-lg mx-auto">
-            El comité organizador de MECAFUT ha congelado las inscripciones para proceder al sorteo oficial. Si ya tienes tu equipo registrado, puedes consultar su estado en la pestaña <strong>Consultar Código</strong>.
+            El comité organizador de MECAFUT ha cerrado las inscripciones reglamentarias (límite alcanzado o fecha límite cumplida). Puedes consultar tu equipo registrado en <strong>Consultar Código</strong> o ver los cruces en <strong>Torneo en Vivo</strong>.
           </p>
         </div>
       )}
 
-      {/* Título Principal y Tarjetas de Cupos en Vivo */}
+      {/* Título Principal */}
       <div className="text-center mb-6">
         <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-950 tracking-tight">{CONFIG_TORNEO.titulo}</h1>
         <p className="text-gray-600 text-sm mt-1">{CONFIG_TORNEO.subtitulo}</p>
       </div>
 
-      {/* Monitor de Cupos Oficiales */}
+      {/* Monitor de Cupos Oficiales (Masculino 12 / Femenino 4 - Sin Lista de Espera) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <div className={`p-4 rounded-xl border transition ${
-          esEsperaEstudiantes ? "bg-amber-50 border-amber-300" : "bg-white border-gray-200 shadow-sm"
+          cupoMascLleno ? "bg-red-50 border-red-300" : "bg-white border-gray-200 shadow-sm"
         }`}>
           <div className="flex justify-between items-center">
             <div>
-              <span className="text-xs uppercase font-bold text-gray-500">Cupos Estudiantiles</span>
+              <span className="text-xs uppercase font-bold text-gray-500">Cupos Categoría Masculina</span>
               <h3 className="text-2xl font-black text-blue-950">
-                {resumen ? `${resumen.estudiantesOcupados} / ${CONFIG_TORNEO.cupos.estudiantes}` : "Cargando..."}
+                {resumen ? `${resumen.masculinoOcupados} / ${CONFIG_TORNEO.cupos.masculino}` : "Cargando..."}
               </h3>
             </div>
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-              esEsperaEstudiantes ? "bg-amber-200 text-amber-900" : "bg-emerald-100 text-emerald-800"
+              cupoMascLleno ? "bg-red-200 text-red-900" : "bg-emerald-100 text-emerald-800"
             }`}>
-              {esEsperaEstudiantes ? "En Lista de Espera" : "Disponibles"}
+              {cupoMascLleno ? "Cupo Agotado (12/12)" : "Disponibles"}
             </span>
           </div>
           <p className="text-[11px] text-gray-500 mt-2">
-            {esEsperaEstudiantes
-              ? "Los nuevos registros entrarán en cola de espera por si un equipo no valida su pago."
-              : "Asignados por estricto orden de llegada."}
+            Únicamente participarán los primeros 12 equipos creados. No hay cupos adicionales.
           </p>
         </div>
 
         <div className={`p-4 rounded-xl border transition ${
-          esEsperaDocentes ? "bg-amber-50 border-amber-300" : "bg-white border-gray-200 shadow-sm"
+          cupoFemLleno ? "bg-red-50 border-red-300" : "bg-white border-gray-200 shadow-sm"
         }`}>
           <div className="flex justify-between items-center">
             <div>
-              <span className="text-xs uppercase font-bold text-gray-500">Cupos Docentes / Facultad</span>
+              <span className="text-xs uppercase font-bold text-gray-500">Cupos Categoría Femenina</span>
               <h3 className="text-2xl font-black text-blue-950">
-                {resumen ? `${resumen.docentesOcupados} / ${CONFIG_TORNEO.cupos.docentes}` : "Cargando..."}
+                {resumen ? `${resumen.femeninoOcupados} / ${CONFIG_TORNEO.cupos.femenino}` : "Cargando..."}
               </h3>
             </div>
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-              esEsperaDocentes ? "bg-amber-200 text-amber-900" : "bg-emerald-100 text-emerald-800"
+              cupoFemLleno ? "bg-red-200 text-red-900" : "bg-purple-100 text-purple-900"
             }`}>
-              {esEsperaDocentes ? "En Lista de Espera" : "Disponibles"}
+              {cupoFemLleno ? "Cupo Lleno" : "Disponibles"}
             </span>
           </div>
           <p className="text-[11px] text-gray-500 mt-2">
-            Espacios exclusivos reservados para profesores y colaboradores.
+            Si se registran 3 equipos, se aplicará el Reglamento Especial Triangular + Gran Final.
           </p>
         </div>
       </div>
@@ -519,7 +509,7 @@ export default function Registro() {
                       checked={jugadorSelf.tipoDocumento === "carnet"}
                       onChange={() => setJugadorSelf({ ...jugadorSelf, tipoDocumento: "carnet" })}
                     />
-                    <span>🪪 Carnet Universitario (Opción principal / Recomendada)</span>
+                    <span>🪪 Carnet Universitario</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-blue-950">
                     <input
@@ -529,11 +519,12 @@ export default function Registro() {
                       checked={jugadorSelf.tipoDocumento === "hoja_confirmacion"}
                       onChange={() => setJugadorSelf({ ...jugadorSelf, tipoDocumento: "hoja_confirmacion" })}
                     />
-                    <span>📄 Hoja de Confirmación de Matrícula (Portal)</span>
+                    <span>📄 Hoja de Matrícula (Portal)</span>
                   </label>
                 </div>
                 <input
                   type="file"
+                  required
                   accept="image/*,.pdf"
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
@@ -583,55 +574,6 @@ export default function Registro() {
       {/* ============================================================ */}
       {rolSeleccionado === "capitan" && (
         <div>
-          {/* Acordeón de Reglamento y Datos Bancarios */}
-          <div className="bg-white border border-gray-200 rounded-xl mb-8 overflow-hidden shadow-sm">
-            <button
-              type="button"
-              onClick={() => setMostrarReglamento(!mostrarReglamento)}
-              className="w-full p-4 text-left font-semibold text-sm text-blue-950 flex justify-between items-center hover:bg-gray-50 transition"
-            >
-              <span className="flex items-center gap-2">
-                <span>📋</span> Reglamento Oficial y Cuentas Bancarias de Inscripción
-              </span>
-              <span className="text-xs text-blue-700">{mostrarReglamento ? "Ocultar ▲" : "Ver detalles ▼"}</span>
-            </button>
-
-            {mostrarReglamento && (
-              <div className="p-4 sm:p-6 bg-gray-50/70 border-t border-gray-200 text-xs sm:text-sm text-gray-700 space-y-4">
-                <div>
-                  <h4 className="font-bold text-blue-950 mb-2">Reglamento del Evento:</h4>
-                  <ul className="list-disc pl-5 space-y-1.5 text-xs text-gray-600">
-                    {CONFIG_TORNEO.reglamento.map((r, i) => (
-                      <li key={i}>{r}</li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="bg-white p-4 rounded-xl border border-blue-200">
-                  <h4 className="font-bold text-blue-950 mb-1">Datos para Transferencia Bancaria (L. 450.00):</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
-                    <p><strong>Banco:</strong> {CONFIG_TORNEO.pago.banco}</p>
-                    <p><strong>Monto Único:</strong> <span className="font-bold text-emerald-700">{CONFIG_TORNEO.pago.monto}</span></p>
-                    <p><strong>Beneficiario:</strong> {CONFIG_TORNEO.pago.beneficiario}</p>
-                    <p><strong>N° Identidad:</strong> {CONFIG_TORNEO.pago.idBeneficiario}</p>
-                    <div className="sm:col-span-2 flex items-center gap-2 mt-1">
-                      <span className="font-mono bg-gray-100 p-1.5 rounded font-bold text-blue-950 text-sm">
-                        {CONFIG_TORNEO.pago.numeroCuenta}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => copiarAlPortapapeles(CONFIG_TORNEO.pago.numeroCuenta, setCopiadoBac)}
-                        className="text-xs bg-blue-900 text-white px-2.5 py-1.5 rounded hover:bg-blue-800 transition"
-                      >
-                        {copiadoBac ? "✓ ¡Copiado!" : "Copiar Cuenta BAC"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Tarjeta de Éxito Capitán */}
           {resultado && (
             <div className="bg-emerald-50 border-2 border-emerald-400 p-6 sm:p-8 rounded-2xl mb-8 shadow-sm">
@@ -640,19 +582,13 @@ export default function Registro() {
                 <h3 className="text-2xl font-extrabold text-emerald-950 mt-2">¡Equipo Registrado Exitosamente!</h3>
                 
                 <div className="inline-block my-3">
-                  <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider ${
-                    resultado.estado === "Lista de espera"
-                      ? "bg-amber-100 text-amber-800 border border-amber-300"
-                      : "bg-blue-100 text-blue-800 border border-blue-300"
-                  }`}>
-                    Estado: {resultado.estado === "Lista de espera" ? "En Lista de Espera (Cupo Agotado)" : "Pendiente de Validación de Pago"}
+                  <span className="text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider bg-blue-100 text-blue-800 border border-blue-300">
+                    Estado: Pendiente de Validación de Pago
                   </span>
                 </div>
 
                 <p className="text-xs sm:text-sm text-emerald-900 max-w-md mx-auto">
-                  {resultado.estado === "Lista de espera"
-                    ? "El cupo inicial se encuentra lleno; si algún equipo no valida su pago a tiempo, tu equipo ascenderá por orden de registro."
-                    : "Tu comprobante será revisado por el comité organizador para otorgar la confirmación definitiva."}
+                  Tu comprobante será revisado por el comité organizador para otorgar la confirmación definitiva.
                 </p>
               </div>
 
@@ -662,7 +598,7 @@ export default function Registro() {
                   {resultado.codigoAcceso}
                 </div>
                 <p className="text-[11px] text-gray-500">
-                  Pásale este enlace a tus compañeros para que se agreguen a la plantilla directamente:
+                  Comparte este código con tus compañeros para que se sumen personalmente desde su cuenta:
                 </p>
                 <div className="flex flex-wrap justify-center gap-2 mt-3">
                   <button
@@ -724,14 +660,26 @@ export default function Registro() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Categoría *</label>
+                  <select
+                    className="w-full border border-gray-300 p-2.5 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-900 focus:outline-none font-bold text-blue-950"
+                    value={equipo.categoria}
+                    onChange={e => setEquipo({ ...equipo, categoria: e.target.value })}
+                  >
+                    <option value="Masculino">Masculino (Cupo oficial: 12 equipos)</option>
+                    <option value="Femenino">Femenino (Cupo oficial: 4 equipos)</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Tipo de Equipo *</label>
                   <select
                     className="w-full border border-gray-300 p-2.5 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-900 focus:outline-none"
                     value={equipo.tipoEquipo}
                     onChange={e => setEquipo({ ...equipo, tipoEquipo: e.target.value })}
                   >
-                    <option value="Estudiantes">Estudiantes (Cupo regular: 12)</option>
-                    <option value="Docentes">Docentes / Colaboradores (Cupo: 2)</option>
+                    <option value="Estudiantes">Estudiantes</option>
+                    <option value="Docentes">Docentes / Colaboradores</option>
                   </select>
                 </div>
 
@@ -748,22 +696,10 @@ export default function Registro() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Categoría *</label>
-                  <select
-                    className="w-full border border-gray-300 p-2.5 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-900 focus:outline-none"
-                    value={equipo.categoria}
-                    onChange={e => setEquipo({ ...equipo, categoria: e.target.value })}
-                  >
-                    <option value="Masculino">Masculino</option>
-                    <option value="Femenino">Femenino</option>
-                  </select>
-                </div>
-
-                {/* Selector Visual de Color de Uniforme (Máximo 2 equipos por color) */}
+                {/* Selector Visual de Color de Uniforme */}
                 <div className="md:col-span-2 pt-2">
                   <label className="block text-xs font-semibold text-gray-700 mb-2">
-                    Color de Uniforme * <span className="font-normal text-gray-500">(Máximo 2 equipos por color; si coinciden en partido se usan chalecos)</span>
+                    Color de Uniforme * <span className="font-normal text-gray-500">(Máximo 2 equipos por color en todo el torneo)</span>
                   </label>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
@@ -823,7 +759,7 @@ export default function Registro() {
                 </span>
               </div>
               <p className="text-xs text-gray-500 mb-4">
-                El Capitán es el representante oficial ante el torneo y forma parte de la plantilla de jugadores automáticamente.
+                El Capitán es el representante oficial ante el torneo y forma parte de la plantilla automáticamente.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -902,16 +838,6 @@ export default function Registro() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Código de Clase que Cursa</label>
-                  <input
-                    placeholder="Ej. MEC308"
-                    className="w-full border border-gray-300 p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none uppercase"
-                    value={capitan.codigoClase}
-                    onChange={e => setCapitan({ ...capitan, codigoClase: e.target.value })}
-                  />
-                </div>
-
                 {/* Documento de Verificación Estudiantil del Capitán */}
                 {equipo.tipoEquipo === "Estudiantes" && (
                   <div className="md:col-span-3 pt-3 border-t border-gray-100 bg-blue-50/40 p-3.5 rounded-xl border border-blue-100">
@@ -919,7 +845,7 @@ export default function Registro() {
                       Foto de Documento Estudiantil del Capitán *
                     </label>
                     <p className="text-[11px] text-gray-500 mb-2">
-                      Sube foto de tu carnet universitario o captura de tu hoja de confirmación de matrícula (portal UNITEC):
+                      Sube foto de tu carnet universitario o confirmación de matrícula (portal UNITEC):
                     </p>
                     <div className="flex flex-wrap gap-4 text-xs mb-2">
                       <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-blue-950">
@@ -930,7 +856,7 @@ export default function Registro() {
                           checked={capitan.tipoDocumento === "carnet"}
                           onChange={() => setCapitan({ ...capitan, tipoDocumento: "carnet" })}
                         />
-                        <span>🪪 Carnet Universitario (Opción principal / Recomendada)</span>
+                        <span>🪪 Carnet Universitario</span>
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-blue-950">
                         <input
@@ -940,11 +866,12 @@ export default function Registro() {
                           checked={capitan.tipoDocumento === "hoja_confirmacion"}
                           onChange={() => setCapitan({ ...capitan, tipoDocumento: "hoja_confirmacion" })}
                         />
-                        <span>📄 Hoja de Confirmación de Matrícula (Portal)</span>
+                        <span>📄 Hoja de Matrícula (Portal)</span>
                       </label>
                     </div>
                     <input
                       type="file"
+                      required
                       accept="image/*,.pdf"
                       onChange={async (e) => {
                         const file = e.target.files?.[0];
@@ -977,7 +904,7 @@ export default function Registro() {
                 <h3 className="text-lg font-bold text-blue-950">Comprobante de Pago Único ({CONFIG_TORNEO.pago.monto})</h3>
               </div>
               <p className="text-xs text-gray-500 mb-4">
-                Un solo pago por todo el equipo. Adjunta la imagen o PDF legible de la transferencia bancaria.
+                Un solo pago por todo el equipo. Cuenta BAC: <strong>{CONFIG_TORNEO.pago.numeroCuenta}</strong>.
               </p>
 
               <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-gray-50/50">
@@ -1008,7 +935,7 @@ export default function Registro() {
                       Plantilla de Integrantes ({totalIntegrantesActual} / {CONFIG_TORNEO.plantilla.max})
                     </h3>
                     <p className="text-xs text-gray-500">
-                      Mínimo reglamentario: 10 integrantes para jugar. Puedes registrar a los que tengas y completar después.
+                      Reglamento: Mínimo 8 integrantes (7 campo + 1 arquero), máximo 15 por equipo.
                     </p>
                   </div>
                 </div>
@@ -1021,50 +948,33 @@ export default function Registro() {
                   >
                     ⚡ Solo yo por ahora
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const faltan = 9 - jugadores.length;
-                      if (faltan > 0) {
-                        const nuevos = Array(faltan).fill(null).map(() => ({
-                          nombre: "",
-                          cuenta: "",
-                          correo: "",
-                          dni: "",
-                          carrera: CONFIG_TORNEO.carreras[0],
-                          codigoClase: ""
-                        }));
-                        setJugadores([...jugadores, ...nuevos]);
-                      }
-                    }}
-                    className="text-xs bg-gray-50 border border-gray-200 hover:bg-gray-100 text-gray-800 px-2.5 py-1.5 rounded-lg font-bold transition shadow-sm"
-                  >
-                    📋 Plantilla de 10
-                  </button>
                   {totalIntegrantesActual < CONFIG_TORNEO.plantilla.max && (
                     <button
                       type="button"
                       onClick={agregarJugador}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1"
                     >
-                      + Agregar Fila
+                      + Agregar Fila Manual
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Aviso del Modo Híbrido */}
-              {jugadores.length === 0 && (
-                <div className="mt-3 p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center gap-3">
-                  <span className="text-2xl">💡</span>
-                  <div>
-                    <strong>¡Modo Fundación Ágil Seleccionado!</strong>
-                    <p className="text-[11px] text-blue-800 mt-0.5">
-                      Inscribirás el equipo solo con tus datos de Capitán para apartar de inmediato tu cupo y color. Al finalizar recibirás tu enlace y código de WhatsApp para que tus compañeros se sumen solos desde sus teléfonos.
-                    </p>
-                  </div>
+              {/* Banner de Recomendación al Capitán (Requisito 5) */}
+              <div className="mt-3 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl text-xs text-blue-950 flex items-start gap-3 shadow-sm">
+                <span className="text-2xl">💡</span>
+                <div className="space-y-1">
+                  <strong className="text-sm font-black text-blue-950 block">
+                    Recomendación Oficial de Registro:
+                  </strong>
+                  <p className="text-xs text-blue-900 leading-relaxed">
+                    Te sugerimos inscribir el equipo solo con tus datos de Capitán para <strong>asegurar inmediatamente tu cupo y color</strong>. Al registrarte recibirás tu código de equipo para que tus compañeros ingresen personalmente con su cuenta y suban su propio carnet.
+                  </p>
+                  <p className="text-[11px] text-gray-500">
+                    * Si decides agregarlos tú mismo manualmente, puedes adjuntar su carnet de una vez o el sistema se lo exigirá a ellos en cuanto inicien sesión.
+                  </p>
                 </div>
-              )}
+              </div>
 
               <div className="space-y-3 mt-4">
                 {/* FILA BLOQUEADA: JUGADOR #1 (CAPITÁN) */}
@@ -1075,7 +985,7 @@ export default function Registro() {
                   <div className="md:col-span-3">
                     <input
                       disabled
-                      value={capitan.nombre ? `${capitan.nombre} (Capitán)` : "Nombre del Capitán (Llenar arriba)"}
+                      value={capitan.nombre ? `${capitan.nombre} (Capitán)` : "Nombre del Capitán"}
                       className="w-full border border-blue-200 p-2 rounded text-xs bg-white text-gray-700 font-semibold"
                     />
                   </div>
@@ -1100,82 +1010,93 @@ export default function Registro() {
                       className="w-full border border-blue-200 p-2 rounded text-xs bg-white text-gray-700 font-mono text-[11px]"
                     />
                   </div>
-                  <div className="md:col-span-2">
-                    <input
-                      disabled
-                      value={capitan.carrera}
-                      className="w-full border border-blue-200 p-2 rounded text-xs bg-white text-gray-700"
-                    />
+                  <div className="md:col-span-2 text-center text-xs font-bold text-emerald-700">
+                    {capitan.fotoDocumento ? "🪪 Carnet Listo" : "⚠️ Subir arriba"}
                   </div>
                 </div>
 
-                {/* FILAS DE JUGADORES 2 EN ADELANTE */}
+                {/* FILAS DE JUGADORES 2 EN ADELANTE (AGREGADAS MANUALMENTE) */}
                 {jugadores.map((j, i) => (
-                  <div key={i} className="p-3 border border-gray-200 rounded-xl bg-gray-50/70 grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
-                    <div className="md:col-span-1 text-center font-bold text-xs text-gray-400">
-                      #{i + 2}
+                  <div key={i} className="p-3 border border-gray-200 rounded-xl bg-gray-50/70 space-y-2">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                      <div className="md:col-span-1 text-center font-bold text-xs text-gray-400">
+                        #{i + 2}
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <input
+                          required
+                          placeholder={`Nombre Jugador ${i + 2} *`}
+                          value={j.nombre}
+                          className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900"
+                          onChange={e => handleJugadorChange(i, "nombre", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <input
+                          required
+                          placeholder="N° Cuenta *"
+                          value={j.cuenta}
+                          className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono"
+                          onChange={e => handleJugadorChange(i, "cuenta", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <input
+                          placeholder={equipo.tipoEquipo === "Docentes" ? "Docente" : "DNI *"}
+                          disabled={equipo.tipoEquipo === "Docentes"}
+                          value={equipo.tipoEquipo === "Docentes" ? "Exento" : j.dni}
+                          className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono text-[11px]"
+                          onChange={e => handleJugadorChange(i, "dni", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <input
+                          placeholder="Correo @unitec.edu"
+                          value={j.correo}
+                          className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono text-[11px]"
+                          onChange={e => handleJugadorChange(i, "correo", e.target.value)}
+                        />
+                      </div>
+
+                      <div className="md:col-span-1 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => eliminarJugador(i)}
+                          title="Eliminar este jugador"
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-bold p-1 rounded transition"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="md:col-span-3">
-                      <input
-                        required
-                        placeholder={`Nombre Jugador ${i + 2} *`}
-                        value={j.nombre}
-                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900"
-                        onChange={e => handleJugadorChange(i, "nombre", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <input
-                        required
-                        placeholder="N° Cuenta *"
-                        value={j.cuenta}
-                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono"
-                        onChange={e => handleJugadorChange(i, "cuenta", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <input
-                        placeholder={equipo.tipoEquipo === "Docentes" ? "Docente" : "DNI"}
-                        disabled={equipo.tipoEquipo === "Docentes"}
-                        value={equipo.tipoEquipo === "Docentes" ? "Exento" : j.dni}
-                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono text-[11px]"
-                        onChange={e => handleJugadorChange(i, "dni", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <input
-                        placeholder="Correo @unitec.edu"
-                        value={j.correo}
-                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono text-[11px]"
-                        onChange={e => handleJugadorChange(i, "correo", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <select
-                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900"
-                        value={j.carrera}
-                        onChange={e => handleJugadorChange(i, "carrera", e.target.value)}
-                      >
-                        {CONFIG_TORNEO.carreras.map(c => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="md:col-span-1 flex items-center justify-end">
-                      <button
-                        type="button"
-                        onClick={() => eliminarJugador(i)}
-                        title="Eliminar este jugador"
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-bold p-1 rounded transition"
-                      >
-                        ✕
-                      </button>
+                    {/* Opción de adjuntar carnet para este integrante (Requisito 5) */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-200 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-gray-600">📷 Foto de Carnet (Opcional por Capitán):</span>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const dataUrl = await comprimirDocumento(file);
+                              handleJugadorChange(i, "fotoDocumento", dataUrl);
+                              handleJugadorChange(i, "fotoDocumentoPreview", dataUrl);
+                            }
+                          }}
+                          className="text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:bg-blue-900 file:text-white"
+                        />
+                      </div>
+                      {j.fotoDocumentoPreview && (
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          ✓ Foto adjunta
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1188,7 +1109,7 @@ export default function Registro() {
               type="submit"
               className="w-full bg-blue-950 hover:bg-blue-900 text-white font-bold py-4 rounded-xl text-base sm:text-lg shadow-lg transition disabled:opacity-50"
             >
-              {loading ? "Procesando y validando inscripción..." : "Finalizar y Registrar Equipo"}
+              {loading ? "Procesando y registrando equipo..." : "Finalizar y Registrar Equipo"}
             </button>
           </form>
         </div>

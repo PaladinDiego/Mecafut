@@ -4,9 +4,11 @@ import {
   buscarEquipoPorCodigo,
   agregarJugadorConCodigo,
   expulsarJugador,
-  validarCorreoInstitucional
+  actualizarDocumentoJugador,
+  comprimirDocumento
 } from "../../lib/dbService";
-import { CONFIG_TORNEO } from "../../lib/torneoConfig";
+import { CONFIG_TORNEO, esDocenteAutorizado } from "../../lib/torneoConfig";
+import { obtenerSesionActual } from "../../lib/authService";
 
 export default function VerEquipo() {
   const [codigo, setCodigo] = useState("");
@@ -14,6 +16,7 @@ export default function VerEquipo() {
   const [jugadores, setJugadores] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sesion, setSesion] = useState(null);
 
   // Formulario para sumar jugador extra con código
   const [mostrarFormNuevo, setMostrarFormNuevo] = useState(false);
@@ -24,14 +27,26 @@ export default function VerEquipo() {
     dni: "",
     tipoDocumento: "carnet",
     fotoDocumento: null,
+    fotoDocumentoPreview: null,
     carrera: CONFIG_TORNEO.carreras[0],
     codigoClase: ""
   });
   const [guardandoJugador, setGuardandoJugador] = useState(false);
   const [mensajeJugador, setMensajeJugador] = useState("");
 
-  // Detectar código en URL (?codigo=12345678)
+  // Modal para que el Capitán o Admin suba/actualice el carnet de un integrante
+  const [modalCarnetJugador, setModalCarnetJugador] = useState(null);
+  const [carnetFotoData, setCarnetFotoData] = useState(null);
+  const [carnetPreview, setCarnetPreview] = useState(null);
+  const [carnetDni, setCarnetDni] = useState("");
+  const [carnetTipoDoc, setCarnetTipoDoc] = useState("carnet");
+  const [guardandoCarnet, setGuardandoCarnet] = useState(false);
+
+  // Modal visor de imagen
+  const [visorModal, setVisorModal] = useState(null);
+
   useEffect(() => {
+    setSesion(obtenerSesionActual());
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const codUrl = params.get("codigo");
@@ -82,6 +97,10 @@ export default function VerEquipo() {
         nombre: "",
         cuenta: "",
         correo: "",
+        dni: "",
+        tipoDocumento: "carnet",
+        fotoDocumento: null,
+        fotoDocumentoPreview: null,
         carrera: CONFIG_TORNEO.carreras[0],
         codigoClase: ""
       });
@@ -110,10 +129,158 @@ export default function VerEquipo() {
     }
   };
 
+  const abrirModalCarnet = (jugador) => {
+    setModalCarnetJugador(jugador);
+    setCarnetDni(jugador.dni === "Exento (Docente)" ? "" : (jugador.dni || ""));
+    setCarnetTipoDoc(jugador.tipoDocumento || "carnet");
+    setCarnetFotoData(jugador.fotoDocumento || null);
+    setCarnetPreview(jugador.fotoDocumento || null);
+  };
+
+  const handleGuardarCarnetJugador = async (e) => {
+    e.preventDefault();
+    if (!carnetFotoData) {
+      alert("Por favor selecciona la foto del carnet o matrícula.");
+      return;
+    }
+    setGuardandoCarnet(true);
+    try {
+      await actualizarDocumentoJugador({
+        jugadorId: modalCarnetJugador.id,
+        dni: carnetDni.trim(),
+        tipoDocumento: carnetTipoDoc,
+        fotoDocumento: carnetFotoData
+      });
+      // Refrescar
+      ejecutarBusqueda(codigo);
+      setModalCarnetJugador(null);
+    } catch (err) {
+      alert("Error actualizando carnet: " + err.message);
+    } finally {
+      setGuardandoCarnet(false);
+    }
+  };
+
   const colorHex = CONFIG_TORNEO.coloresUniforme.find(c => c.nombre.toLowerCase() === (equipo?.color || "").toLowerCase())?.hex || "#2563eb";
+  const esCapitanOAdmin = sesion && (sesion.rol === "admin" || (equipo?.capitan?.correo && sesion.correo?.toLowerCase() === equipo.capitan.correo?.toLowerCase()));
 
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-20">
+      {/* Modal para ver imagen */}
+      {visorModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 max-w-lg w-full text-center shadow-2xl">
+            <div className="flex justify-between items-center mb-3 border-b pb-2">
+              <h4 className="font-bold text-blue-950 text-sm truncate">{visorModal.titulo}</h4>
+              <button onClick={() => setVisorModal(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+            </div>
+            {visorModal.url ? (
+              <img src={visorModal.url} alt="Doc" className="max-h-[60vh] mx-auto rounded border" />
+            ) : (
+              <p className="text-xs text-gray-400 py-6">Sin imagen registrada.</p>
+            )}
+            <button
+              onClick={() => setVisorModal(null)}
+              className="mt-4 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold px-4 py-2 rounded-lg"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para que Capitán/Admin suba el carnet de un integrante (Requisito 5) */}
+      {modalCarnetJugador && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-blue-900 text-left animate-fade-in">
+            <div className="flex justify-between items-center mb-3 border-b pb-2">
+              <div>
+                <span className="text-[10px] font-bold uppercase text-blue-900 tracking-wider">Gestión del Capitán</span>
+                <h4 className="text-base font-black text-blue-950">Subir Carnet de {modalCarnetJugador.nombre}</h4>
+              </div>
+              <button onClick={() => setModalCarnetJugador(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleGuardarCarnetJugador} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">DNI del Jugador *</label>
+                <input
+                  required
+                  placeholder="Ej. 0801-2003-12345"
+                  value={carnetDni}
+                  onChange={(e) => setCarnetDni(e.target.value)}
+                  className="w-full border border-gray-300 p-2.5 rounded-xl text-xs font-mono"
+                />
+              </div>
+
+              <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                <label className="block text-xs font-bold text-blue-950 uppercase mb-1">Tipo de Documento</label>
+                <div className="flex gap-4 text-xs mb-2">
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="tipoDocAdminMod"
+                      value="carnet"
+                      checked={carnetTipoDoc === "carnet"}
+                      onChange={() => setCarnetTipoDoc("carnet")}
+                    />
+                    <span>🪪 Carnet</span>
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="tipoDocAdminMod"
+                      value="hoja_confirmacion"
+                      checked={carnetTipoDoc === "hoja_confirmacion"}
+                      onChange={() => setCarnetTipoDoc("hoja_confirmacion")}
+                    />
+                    <span>📄 Matrícula</span>
+                  </label>
+                </div>
+
+                <input
+                  type="file"
+                  required
+                  accept="image/*,.pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const dataUrl = await comprimirDocumento(file);
+                      setCarnetFotoData(dataUrl);
+                      setCarnetPreview(dataUrl);
+                    }
+                  }}
+                  className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:bg-blue-950 file:text-white"
+                />
+
+                {carnetPreview && (
+                  <div className="mt-2 p-1 bg-white rounded border inline-block">
+                    <img src={carnetPreview} alt="Preview" className="max-h-20 rounded border" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalCarnetJugador(null)}
+                  className="w-1/3 border border-gray-300 py-2.5 rounded-xl text-xs font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoCarnet}
+                  className="w-2/3 bg-blue-950 hover:bg-blue-900 text-white font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                >
+                  {guardandoCarnet ? "Guardando..." : "Guardar Carnet"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Caja de Búsqueda */}
       <div className="bg-white p-6 sm:p-8 rounded-2xl border border-gray-200 shadow-sm text-center max-w-lg mx-auto mb-8">
         <h2 className="text-2xl font-black text-blue-950 mb-1">Consultar mi Equipo</h2>
@@ -166,8 +333,6 @@ export default function VerEquipo() {
                 <span className={`text-xs font-bold px-2.5 py-0.5 rounded ${
                   equipo.estado === "Confirmado"
                     ? "bg-emerald-100 text-emerald-800"
-                    : equipo.estado === "Lista de espera"
-                    ? "bg-amber-100 text-amber-800"
                     : equipo.estado === "Rechazado"
                     ? "bg-red-100 text-red-800"
                     : "bg-blue-100 text-blue-800"
@@ -211,6 +376,17 @@ export default function VerEquipo() {
             </div>
           </div>
 
+          {/* Banner de Recomendación al Capitán */}
+          {esCapitanOAdmin && (
+            <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-950 flex items-start gap-2.5 shadow-sm">
+              <span className="text-xl">💡</span>
+              <div>
+                <strong>Consejo para el Capitán:</strong> Puedes compartir el código{" "}
+                <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border text-blue-900">{codigo}</span> con tus compañeros para que se sumen solos y suban su carnet desde su teléfono, o puedes usar el botón azul de cada fila para subir el carnet tú mismo.
+              </div>
+            </div>
+          )}
+
           {/* Acción para agregar jugador si hay cupo */}
           {jugadores.length < CONFIG_TORNEO.plantilla.max && equipo.estado !== "Rechazado" && (
             <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-4">
@@ -218,7 +394,7 @@ export default function VerEquipo() {
                 <div>
                   <h4 className="font-bold text-xs sm:text-sm text-blue-950">¿Necesitas sumar un compañero al equipo?</h4>
                   <p className="text-xs text-gray-500">
-                    Aún tienes {CONFIG_TORNEO.plantilla.max - jugadores.length} cupos libres en tu plantilla reglamentaria.
+                    Aún tienes {CONFIG_TORNEO.plantilla.max - jugadores.length} cupos libres en tu plantilla reglamentaria (máximo 15).
                   </p>
                 </div>
                 <button
@@ -260,44 +436,27 @@ export default function VerEquipo() {
                     />
                   </div>
 
-                  {equipo?.tipoEquipo === "Estudiantes" && (
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        N° de Identidad (DNI) *
-                      </label>
-                      <input
-                        required
-                        placeholder="Ej. 0801-2003-99999"
-                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono"
-                        value={nuevoJugador.dni}
-                        onChange={e => setNuevoJugador({ ...nuevoJugador, dni: e.target.value })}
-                      />
-                    </div>
-                  )}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      N° de Identidad (DNI) *
+                    </label>
+                    <input
+                      placeholder="Ej. 0801-2003-99999"
+                      className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono"
+                      value={nuevoJugador.dni}
+                      onChange={e => setNuevoJugador({ ...nuevoJugador, dni: e.target.value })}
+                    />
+                  </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Correo Institucional (@unitec.edu) *</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Correo Institucional (@unitec.edu)</label>
                     <input
-                      required
                       type="email"
                       placeholder="alumno@unitec.edu"
                       className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900 font-mono"
                       value={nuevoJugador.correo}
                       onChange={e => setNuevoJugador({ ...nuevoJugador, correo: e.target.value })}
                     />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Carrera *</label>
-                    <select
-                      className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-900"
-                      value={nuevoJugador.carrera}
-                      onChange={e => setNuevoJugador({ ...nuevoJugador, carrera: e.target.value })}
-                    >
-                      {CONFIG_TORNEO.carreras.map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
                   </div>
 
                   <div className="sm:col-span-2">
@@ -314,7 +473,7 @@ export default function VerEquipo() {
             </div>
           )}
 
-          {/* Estado de la Plantilla (Modo Híbrido) */}
+          {/* Estado de la Plantilla (Mínimo 8 reglamentario) */}
           {jugadores.length < CONFIG_TORNEO.plantilla.min ? (
             <div className="bg-amber-50 border border-amber-300 p-4 rounded-xl text-xs text-amber-900 shadow-sm">
               <div className="flex flex-wrap justify-between items-center gap-1 mb-1.5">
@@ -326,7 +485,7 @@ export default function VerEquipo() {
                 </span>
               </div>
               <p className="text-[11px] text-amber-800">
-                Tu cupo y color están reservados, pero el reglamento exige al menos 10 integrantes para jugar. Puedes agregar compañeros manualmente con el botón verde o pasarles el código de equipo para que se unan desde sus teléfonos.
+                El reglamento exige al menos 8 jugadores en cancha (7 de campo + 1 arquero).
               </p>
               <div className="w-full bg-amber-200/70 h-2 rounded-full overflow-hidden mt-2.5">
                 <div
@@ -342,7 +501,7 @@ export default function VerEquipo() {
                   <span>✅</span> Plantilla Reglamentaria Completa ({jugadores.length} / {CONFIG_TORNEO.plantilla.max})
                 </strong>
                 <p className="text-[11px] text-emerald-800 mt-0.5">
-                  Tu equipo cumple con el mínimo de 10 integrantes reglamentarios y está listo para la programación de partidos.
+                  Cumple con el mínimo de 8 jugadores y está listo para la programación de partidos.
                 </p>
               </div>
               <span className="bg-emerald-200 text-emerald-900 font-extrabold px-2.5 py-1 rounded text-xs">
@@ -351,14 +510,14 @@ export default function VerEquipo() {
             </div>
           )}
 
-          {/* Tabla Oficial de Jugadores */}
+          {/* Tabla Oficial de Jugadores con gestión de carnets */}
           <div>
             <div className="flex flex-wrap justify-between items-center mb-3 gap-2">
               <h4 className="font-bold text-gray-900 text-sm sm:text-base">
                 Plantilla Oficial de Jugadores ({jugadores.length})
               </h4>
               <p className="text-[11px] text-gray-500">
-                El Capitán puede expulsar integrantes para liberar cupos o cuentas erróneas.
+                Verificación de Carnet estudiantil obligatoria.
               </p>
             </div>
 
@@ -369,45 +528,80 @@ export default function VerEquipo() {
                     <th className="p-3">#</th>
                     <th className="p-3">Jugador</th>
                     <th className="p-3">N° Cuenta</th>
-                    <th className="p-3">DNI (Identidad)</th>
-                    <th className="p-3">Correo</th>
-                    <th className="p-3">Carrera</th>
+                    <th className="p-3">DNI</th>
+                    <th className="p-3">Carnet / Doc</th>
                     <th className="p-3 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {jugadores.map((j, i) => (
-                    <tr key={i} className={`hover:bg-gray-50 ${j.esCapitan ? "bg-blue-50/40 font-semibold" : ""}`}>
-                      <td className="p-3 text-gray-400 font-mono text-xs">{i + 1}</td>
-                      <td className="p-3 text-gray-900">
-                        {j.nombre}
-                        {j.esCapitan && (
-                          <span className="ml-2 text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">
-                            Capitán
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 font-mono text-gray-600">{j.cuenta}</td>
-                      <td className="p-3 font-mono text-gray-800 text-xs font-semibold">{j.dni || "N/A"}</td>
-                      <td className="p-3 font-mono text-gray-500 text-xs">{j.correo || "N/A"}</td>
-                      <td className="p-3 text-gray-700">{j.carrera}</td>
-                      <td className="p-3 text-center">
-                        {j.esCapitan ? (
-                          <span className="text-[11px] text-gray-400 font-semibold italic">Fundador</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleExpulsarJugador(j)}
-                            className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 rounded-lg text-xs font-bold transition inline-flex items-center gap-1 shadow-sm"
-                            title="Expulsar jugador y liberar su cuenta"
-                          >
-                            <span>🗑️</span>
-                            <span>Expulsar</span>
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {jugadores.map((j, i) => {
+                    const tieneCarnet = Boolean(j.fotoDocumento);
+                    return (
+                      <tr key={i} className={`hover:bg-gray-50 ${j.esCapitan ? "bg-blue-50/40 font-semibold" : ""}`}>
+                        <td className="p-3 text-gray-400 font-mono text-xs">{i + 1}</td>
+                        <td className="p-3 text-gray-900">
+                          {j.nombre}
+                          {j.esCapitan && (
+                            <span className="ml-2 text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">
+                              Capitán
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-mono text-gray-600">{j.cuenta}</td>
+                        <td className="p-3 font-mono text-gray-800 text-xs font-semibold">{j.dni || "Pendiente"}</td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-1.5">
+                            {tieneCarnet ? (
+                              <button
+                                type="button"
+                                onClick={() => setVisorModal({
+                                  titulo: `Carnet de ${j.nombre} (${j.cuenta})`,
+                                  url: j.fotoDocumento
+                                })}
+                                className="bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1"
+                              >
+                                <span>🪪</span>
+                                <span>Ver Carnet</span>
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                                ⚠️ Pendiente
+                              </span>
+                            )}
+
+                            {/* Botón para que Capitán o Admin suba el carnet si falta o desea cambiarlo */}
+                            {esCapitanOAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => abrirModalCarnet(j)}
+                                className="text-[10px] text-blue-700 hover:text-blue-900 hover:underline font-bold ml-1"
+                                title="Subir o actualizar foto del carnet"
+                              >
+                                {tieneCarnet ? "Cambiar" : "+ Subir"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3 text-center">
+                          {j.esCapitan ? (
+                            <span className="text-[11px] text-gray-400 font-semibold italic">Fundador</span>
+                          ) : esCapitanOAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleExpulsarJugador(j)}
+                              className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2 py-1 rounded-lg text-xs font-bold transition inline-flex items-center gap-1 shadow-sm"
+                              title="Expulsar jugador y liberar su cuenta"
+                            >
+                              <span>🗑️</span>
+                              <span>Expulsar</span>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">Miembro</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -1,7 +1,10 @@
 # 🚀 DEPLOYMENT_AI_GUIDE.md — Guía Técnica Integral de Despliegue en la Nube
 
-> Este documento contiene las especificaciones técnicas exhaustivas de arquitectura, esquema de colecciones de base de datos, integración de correo institucional y despliegue en Vercel para **MECAFUT Q4 2026**.  
-> Diseñado para que cualquier Agente de IA o Ingeniero de Software pueda aprovisionar la infraestructura completa de inicio a fin.
+> **ESTADO DE PRODUCCIÓN:** 🟢 **ACTIVO Y PUBLICADO**  
+> **URL Oficial:** [https://mecafut-2026.netlify.app/](https://mecafut-2026.netlify.app/)  
+> **Backend & Base de Datos:** Supabase PostgreSQL (`mecafut-2026` / `us-east-1`)  
+> **Hosting & CI/CD:** Netlify (`mecafut-2026.netlify.app`) conectado a GitHub `PaladinDiego/Mecafut` (rama `main`)  
+> **Servicio de Correo OTP:** EmailJS (`mecatronica.unitec@outlook.com`) con firma oficial de Carlos Rubi.
 
 ---
 

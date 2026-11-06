@@ -5,8 +5,10 @@
 [![Next.js 14](https://img.shields.io/badge/Next.js-14.1.0-black?logo=next.js)](https://nextjs.org/)
 [![React 18](https://img.shields.io/badge/React-18-blue?logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.3.0-38bdf8?logo=tailwindcss)](https://tailwindcss.com/)
-[![Firebase](https://img.shields.io/badge/Firebase-Firestore-FFA611?logo=firebase)](https://firebase.google.com/)
-[![Vercel Ready](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel)](https://vercel.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com/)
+[![Netlify Status](https://api.netlify.com/api/v1/badges/ffc92ca3-1746-46d5-bcf9-69897ed270ac/deploy-status)](https://app.netlify.com/projects/mecafut-2026/deploys)
+
+🌐 **Sitio Web Oficial en Producción:** [https://mecafut-2026.netlify.app/](https://mecafut-2026.netlify.app/)
 
 > 🤖 **¿Eres un Agente IA o Desarrollador implementando este proyecto?**  
 > Lee directamente **[`AGENTS.md`](./AGENTS.md)** para el protocolo de despliegue paso a paso, checklist de preguntas para el usuario y resolución de credenciales.  

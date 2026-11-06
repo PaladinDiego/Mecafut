@@ -63,7 +63,11 @@ console.log("🚀 Enviando solicitud a EmailJS API...");
 
 fetch("https://api.emailjs.com/api/v1.0/email/send", {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    "Origin": "http://localhost:3000",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  },
   body: JSON.stringify(payload)
 })
   .then(async (res) => {

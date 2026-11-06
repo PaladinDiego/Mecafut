@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "firebase": "^10.8.0",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",

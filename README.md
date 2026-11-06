@@ -8,6 +8,10 @@
 [![Firebase](https://img.shields.io/badge/Firebase-Firestore-FFA611?logo=firebase)](https://firebase.google.com/)
 [![Vercel Ready](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel)](https://vercel.com/)
 
+> 🤖 **¿Eres un Agente IA o Desarrollador implementando este proyecto?**  
+> Lee directamente **[`AGENTS.md`](./AGENTS.md)** para el protocolo de despliegue paso a paso, checklist de preguntas para el usuario y resolución de credenciales.  
+> Consulta **[`DEPLOYMENT_AI_GUIDE.md`](./DEPLOYMENT_AI_GUIDE.md)** para la guía técnica profunda de arquitectura y colecciones de Firebase.
+
 ---
 
 ## 🚀 Características Principales

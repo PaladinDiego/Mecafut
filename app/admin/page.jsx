@@ -24,7 +24,6 @@ import {
 import BracketTorneo from "../../components/BracketTorneo";
 
 export default function Admin() {
-  const [auth, setAuth] = useState({ user: "", pass: "" });
   const [isLogged, setIsLogged] = useState(false);
   const [jugadores, setJugadores] = useState([]);
   const [equipos, setEquipos] = useState([]);
@@ -56,30 +55,16 @@ export default function Admin() {
   const [nuevoCriterioNombre, setNuevoCriterioNombre] = useState("");
   const [nuevoCriterioIcono, setNuevoCriterioIcono] = useState("🏆");
 
+  const [sesionActual, setSesionActual] = useState(null);
+
   useEffect(() => {
     const s = obtenerSesionActual();
+    setSesionActual(s);
     if (s && s.rol === "admin") {
       setIsLogged(true);
       fetchData();
     }
   }, []);
-
-  const adminUser = process.env.NEXT_PUBLIC_ADMIN_USER || "admin";
-  const adminPass = process.env.NEXT_PUBLIC_ADMIN_PASS || "mecafut2026";
-
-  const login = (e) => {
-    e.preventDefault();
-    const esValido =
-      (auth.user === adminUser && auth.pass === adminPass) ||
-      (auth.user === "carlosrubi" && auth.pass === "22211206");
-
-    if (esValido) {
-      setIsLogged(true);
-      fetchData();
-    } else {
-      alert("Credenciales incorrectas. (Default para pruebas: admin / mecafut2026)");
-    }
-  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -345,12 +330,27 @@ export default function Admin() {
   if (!isLogged) {
     return (
       <div className="min-h-[75vh] flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-xl w-full max-w-sm text-center">
-          <div className="w-12 h-12 bg-blue-100 text-blue-900 rounded-2xl flex items-center justify-center mx-auto mb-4 text-xl font-bold">
+        <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-xl w-full max-w-md text-center animate-fade-in">
+          <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl font-black">
             🔒
           </div>
-          <h2 className="text-xl font-bold text-blue-950 mb-1">Acceso Administrativo</h2>
+          <h2 className="text-xl font-black text-blue-950 mb-1">Acceso Administrativo Protegido</h2>
           <p className="text-xs text-gray-500 mb-6">Comité Organizador — MECAFUT 2026</p>
+
+          <div className="bg-gray-50 p-4 rounded-2xl border text-xs text-gray-600 text-left space-y-2 mb-6">
+            <p>
+              El acceso a este panel está restringido exclusivamente a las cuentas oficiales autorizadas en la lista blanca del Comité Organizador.
+            </p>
+            {sesionActual ? (
+              <p className="text-red-700 font-semibold">
+                Has iniciado sesión como <strong>{sesionActual.correo}</strong>, pero esta cuenta no cuenta con rol de Administrador.
+              </p>
+            ) : (
+              <p className="text-blue-900 font-semibold">
+                Debes iniciar sesión con tu correo de administrador oficial (@unitec.edu).
+              </p>
+            )}
+          </div>
 
           {process.env.NODE_ENV !== "production" && (
             <button
@@ -360,42 +360,19 @@ export default function Admin() {
                 setIsLogged(true);
                 fetchData();
               }}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow mb-4 flex items-center justify-center gap-2"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow mb-3 flex items-center justify-center gap-2"
             >
               <span>⚡</span>
-              <span>Entrar como Admin (admin@unitec.edu) [Dev]</span>
+              <span>Entrar como Admin (admin@unitec.edu) [Modo Dev]</span>
             </button>
           )}
 
-          <form onSubmit={login} className="space-y-4 text-left pt-2 border-t">
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Usuario</label>
-              <input
-                required
-                placeholder="admin"
-                className="w-full border border-gray-300 p-2.5 rounded-lg text-sm"
-                value={auth.user}
-                onChange={(e) => setAuth({ ...auth, user: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Contraseña</label>
-              <input
-                required
-                type="password"
-                placeholder="••••••••"
-                className="w-full border border-gray-300 p-2.5 rounded-lg text-sm"
-                value={auth.pass}
-                onChange={(e) => setAuth({ ...auth, pass: e.target.value })}
-              />
-            </div>
-            <button
-              type="submit"
-              className="w-full bg-blue-950 hover:bg-blue-900 text-white font-bold py-2.5 rounded-xl text-sm transition shadow"
-            >
-              Ingresar con Contraseña
-            </button>
-          </form>
+          <a
+            href="/"
+            className="block w-full border border-gray-300 hover:bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-xs transition text-center"
+          >
+            ← Volver al Inicio
+          </a>
         </div>
       </div>
     );

@@ -6,44 +6,60 @@ service cloud.firestore {
     // Helper: Validar si la petición proviene de un administrador de MECAFUT
     function esAdmin() {
       return request.auth != null && 
-        (request.auth.token.email == "admin@unitec.edu" || 
-         request.auth.token.email.matches(".*@unitec\\.edu.*"));
+        (request.auth.token.email in [
+          "admin@unitec.edu",
+          "diego.paladin@unitec.edu",
+          "carlos.rubi@unitec.edu",
+          "organizacion.mecafut@unitec.edu"
+        ]);
     }
 
     // Colección: Equipos
     match /equipos/{equipoId} {
-      // Lectura pública de equipos confirmados y cupos
+      // Lectura pública de equipos y cupos
       allow read: if true;
       
-      // Creación permitida durante el periodo oficial de inscripciones
+      // Creación durante inscripciones con validación de campos mínimos requeridos
       allow create: if request.resource.data.nombre is string
+                    && request.resource.data.nombre.size() >= 3
                     && request.resource.data.categoria in ['Masculino', 'Femenino']
-                    && request.resource.data.codigoAcceso is string;
+                    && request.resource.data.codigoAcceso is string
+                    && request.resource.data.codigoAcceso.size() == 8
+                    && request.resource.data.estado in ['Pendiente', 'Confirmado'];
 
-      // Actualización y borrado permitido a administradores o actualización de comprobante/estado
-      allow update, delete: if true; // En producción estricta: if esAdmin();
+      // Actualización de comprobante o administradores
+      allow update: if esAdmin() || 
+                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comprobanteDataUrl', 'comprobanteAdjunto']));
+
+      // Prohibir borrado accidental o sabotaje desde clientes anónimos
+      allow delete: if esAdmin();
     }
 
     // Colección: Jugadores
     match /jugadores/{jugadorId} {
-      // Lectura pública para padrón de jugadores, consulta de capitanes y cuadro del torneo
+      // Lectura pública para padrón de jugadores y cuadro del torneo
       allow read: if true;
 
-      // Creación al registrar equipo o al unirse mediante código
+      // Creación al registrar equipo o unirse con código
       allow create: if request.resource.data.nombre is string
-                    && request.resource.data.cuenta is string;
+                    && request.resource.data.cuenta is string
+                    && request.resource.data.equipoId is string;
 
-      // Actualización de documentos o expulsión permitida
-      allow update, delete: if true;
+      // Actualización restringida a datos de carnet y DNI
+      allow update: if esAdmin() || 
+                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fotoDocumento', 'tipoDocumento', 'dni']));
+
+      // Borrado permitido al capitán o al administrador
+      allow delete: if esAdmin();
     }
 
     // Colección: Configuración y Torneo en Vivo
     match /configuracion/{docId} {
-      // Lectura pública para saber si las inscripciones están abiertas y ver llaves/resultados
+      // Lectura pública para consultar fechas, estado de inscripciones y marcadores
       allow read: if true;
 
-      // Escritura reservada para el comité organizador
-      allow write: if true; // En producción con Firebase Auth: if esAdmin();
+      // Escritura restringida al Comité Organizador
+      allow write: if esAdmin();
     }
   }
 }

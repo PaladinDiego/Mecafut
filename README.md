@@ -96,15 +96,13 @@ NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=tu_proyecto.appspot.com
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=tu_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=tu_app_id
 
-# Credenciales de Administrador para /admin
-NEXT_PUBLIC_ADMIN_USER=admin
-NEXT_PUBLIC_ADMIN_PASS=mecafut2026
-
 # Servicio OTP real a buzón institucional (Opcional - EmailJS)
 NEXT_PUBLIC_EMAILJS_SERVICE_ID=
 NEXT_PUBLIC_EMAILJS_TEMPLATE_ID=
 NEXT_PUBLIC_EMAILJS_PUBLIC_KEY=
 ```
+
+> **Nota de Seguridad:** El panel `/admin` está protegido por lista blanca de correos institucionales `@unitec.edu` en `lib/torneoConfig.js` (`admins`). No se utilizan contraseñas públicas expuestas en el código frontend.
 
 ---
 

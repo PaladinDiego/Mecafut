@@ -259,6 +259,12 @@ export default function AuthGate({ children }) {
                   onChange={(e) => setCodigo(e.target.value)}
                   className="w-full border border-gray-300 p-3 rounded-xl text-center text-2xl font-mono tracking-widest font-black focus:ring-2 focus:ring-blue-900 focus:outline-none"
                 />
+                <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5 mt-2 flex items-start gap-1.5 leading-snug">
+                  <span className="text-sm">📬</span>
+                  <span>
+                    Si no lo ves en tu bandeja principal de Outlook, revisa en tu pestaña <strong>"Otros"</strong> o en la carpeta de <strong>"Correo no deseado / Spam"</strong>.
+                  </span>
+                </p>
               </div>
 
               <div className="flex gap-2">

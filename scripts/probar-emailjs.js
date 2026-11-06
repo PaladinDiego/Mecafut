@@ -23,14 +23,24 @@ if (fs.existsSync(envLocalPath)) {
   });
 }
 
-const serviceId = process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID;
-const templateId = process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID;
-const publicKey = process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY;
+const cuenta = process.argv[3] === "2" ? "2" : "1";
+
+const serviceId = cuenta === "2"
+  ? (process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID_2 || "service_1cf52oc")
+  : (process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID || "service_ar5incb");
+
+const templateId = cuenta === "2"
+  ? (process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID_2 || "template_2fkhyps")
+  : (process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID || "template_xfm3uu3");
+
+const publicKey = cuenta === "2"
+  ? (process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY_2 || "7CpkO7AM8FtYzeoIm")
+  : (process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY || "dMui9NIr2noTnsQ-d");
 
 const correoDestino = process.argv[2] || "andresvalle@unitec.edu";
 
 console.log("=========================================");
-console.log("🧪 MECAFUT 2026 — Verificador de EmailJS");
+console.log(`🧪 MECAFUT 2026 — Verificador EmailJS (Cuenta ${cuenta})`);
 console.log("=========================================");
 console.log(`Service ID:   ${serviceId || "❌ No configurado"}`);
 console.log(`Template ID:  ${templateId || "❌ No configurado"}`);

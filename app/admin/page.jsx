@@ -356,14 +356,14 @@ export default function Admin() {
             <button
               type="button"
               onClick={() => {
-                verificarOtp("admin@unitec.edu", "123456");
+                verificarOtp("carlos.rubi@unitec.edu", "123456");
                 setIsLogged(true);
                 fetchData();
               }}
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow mb-3 flex items-center justify-center gap-2"
             >
               <span>⚡</span>
-              <span>Entrar como Admin (admin@unitec.edu) [Modo Dev]</span>
+              <span>Entrar como Admin (carlos.rubi@unitec.edu) [Modo Dev]</span>
             </button>
           )}
 

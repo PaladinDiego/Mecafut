@@ -100,9 +100,15 @@ NEXT_PUBLIC_FIREBASE_APP_ID=tu_app_id
 NEXT_PUBLIC_EMAILJS_SERVICE_ID=
 NEXT_PUBLIC_EMAILJS_TEMPLATE_ID=
 NEXT_PUBLIC_EMAILJS_PUBLIC_KEY=
+
+# Lista adicional de administradores autorizados (Separados por coma)
+NEXT_PUBLIC_ADMIN_EMAILS=
 ```
 
-> **Nota de Seguridad:** El panel `/admin` está protegido por lista blanca de correos institucionales `@unitec.edu` en `lib/torneoConfig.js` (`admins`). No se utilizan contraseñas públicas expuestas en el código frontend.
+> **Nota de Seguridad y Roles:** 
+> - El acceso al panel `/admin` y los controles de torneo en vivo están restringidos por la lista blanca oficial de administradores en `lib/torneoConfig.js` y `firestore.rules`.
+> - Cualquier usuario que inicie sesión con uno de los 11 correos autorizados del Comité Organizador (`andresvalle@unitec.edu`, `carlos.rubi@unitec.edu`, etc.) recibe automáticamente el rol `admin` y la insignia `👑 ADMIN`.
+> - Puedes agregar administradores adicionales en cualquier momento sin modificar código definiendo la variable `NEXT_PUBLIC_ADMIN_EMAILS` en el panel de Vercel (ejemplo: `coord@unitec.edu,asistente@unitec.edu.hn`).
 
 ---
 

@@ -177,7 +177,7 @@ export default function AuthGate({ children }) {
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setCorreo("admin@unitec.edu")}
+                      onClick={() => setCorreo("carlos.rubi@unitec.edu")}
                       className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
                     >
                       👑 Admin

@@ -12,11 +12,15 @@ export default function TorneoEnVivo() {
   const [jugadoresDB, setJugadoresDB] = useState([]);
 
   useEffect(() => {
-    setSesion(obtenerSesionActual());
+    try {
+      setSesion(obtenerSesionActual());
+    } catch (e) {
+      console.warn("Error leyendo sesión:", e);
+    }
     cargarJugadores();
 
     const unsub = suscribirTorneoEnVivo((data) => {
-      setTorneo(data);
+      setTorneo(data || {});
       setLoading(false);
     });
 
@@ -28,45 +32,60 @@ export default function TorneoEnVivo() {
   const cargarJugadores = async () => {
     try {
       const data = await obtenerDatosAdmin();
-      setJugadoresDB(data.jugadores || []);
+      setJugadoresDB(data?.jugadores || []);
     } catch (e) {
       console.error("Error cargando jugadores para ranking:", e);
+      setJugadoresDB([]);
     }
   };
 
-  // Cálculo de la Tabla de Goleadores a partir de todos los goles registrados en los partidos
+  // Cálculo defensivo de la Tabla de Goleadores a partir de todos los goles registrados
   const calcularTablaGoleadores = () => {
     if (!torneo?.brackets) return [];
 
     const conteo = {};
 
     const procesarPartido = (partido) => {
-      if (partido?.goleadores && Array.isArray(partido.goleadores)) {
-        partido.goleadores.forEach((g) => {
-          const key = g.jugadorId || g.nombreJugador;
-          if (!conteo[key]) {
-            conteo[key] = {
-              jugadorId: g.jugadorId,
-              nombre: g.nombreJugador,
-              nombreEquipo: g.nombreEquipo || "Equipo",
-              goles: 0
-            };
-          }
-          conteo[key].goles += parseInt(g.cantidad || 1, 10);
-        });
-      }
+      if (!partido || !Array.isArray(partido.goleadores)) return;
+      partido.goleadores.forEach((g) => {
+        if (!g) return;
+        const key = g.jugadorId || g.nombreJugador || "anonimo";
+        if (!conteo[key]) {
+          conteo[key] = {
+            jugadorId: g.jugadorId,
+            nombre: g.nombreJugador || "Jugador",
+            nombreEquipo: g.nombreEquipo || "Equipo",
+            goles: 0
+          };
+        }
+        conteo[key].goles += parseInt(g.cantidad || 1, 10);
+      });
     };
 
     // Revisar Masculino
-    const bMasc = torneo.brackets.Masculino;
-    if (bMasc?.rondas) {
-      bMasc.rondas.forEach((r) => r.partidos.forEach(procesarPartido));
+    const bMasc = torneo?.brackets?.Masculino;
+    if (Array.isArray(bMasc?.rondas)) {
+      bMasc.rondas.forEach((r) => {
+        if (Array.isArray(r?.partidos)) {
+          r.partidos.forEach(procesarPartido);
+        }
+      });
     }
 
-    // Revisar Femenino
-    const bFem = torneo.brackets.Femenino;
-    if (bFem?.jornadas) {
+    // Revisar Femenino (soporta formato triangular y eliminación directa)
+    const bFem = torneo?.brackets?.Femenino;
+    if (Array.isArray(bFem?.jornadas)) {
       bFem.jornadas.forEach(procesarPartido);
+    }
+    if (Array.isArray(bFem?.partidos)) {
+      bFem.partidos.forEach(procesarPartido);
+    }
+    if (Array.isArray(bFem?.rondas)) {
+      bFem.rondas.forEach((r) => {
+        if (Array.isArray(r?.partidos)) {
+          r.partidos.forEach(procesarPartido);
+        }
+      });
     }
     if (bFem?.granFinal) {
       procesarPartido(bFem.granFinal);
@@ -76,7 +95,7 @@ export default function TorneoEnVivo() {
   };
 
   const tablaGoleadores = calcularTablaGoleadores();
-  const criteriosPremios = torneo?.criteriosPremios || [];
+  const criteriosPremios = Array.isArray(torneo?.criteriosPremios) ? torneo.criteriosPremios : [];
 
   const bracketActual =
     categoriaSeleccionada === "Masculino"
@@ -89,6 +108,27 @@ export default function TorneoEnVivo() {
   const esVisibleAlPublico =
     torneo?.visibilidadPublica === "visible" ||
     (torneo?.visibilidadPublica === "auto" && esFechaLlegada);
+
+  const formatearFechaEvento = (fechaStr) => {
+    if (!fechaStr) return "Próximamente";
+    try {
+      const cleanStr = fechaStr.includes("T") ? fechaStr : `${fechaStr}T12:00:00`;
+      const d = new Date(cleanStr);
+      return isNaN(d.getTime()) ? fechaStr : d.toLocaleDateString("es-HN", { dateStyle: "long" });
+    } catch {
+      return fechaStr;
+    }
+  };
+
+  const formatearHoraActualizado = (fechaStr) => {
+    if (!fechaStr) return "En espera";
+    try {
+      const d = new Date(fechaStr);
+      return isNaN(d.getTime()) ? "En espera" : `Actualizado: ${d.toLocaleTimeString("es-HN")}`;
+    } catch {
+      return "En espera";
+    }
+  };
 
   if (loading) {
     return (
@@ -112,7 +152,7 @@ export default function TorneoEnVivo() {
             La tabla de cruces, resultados minuto a minuto y premios individuales se activarán el día oficial del evento deportivo:
           </p>
           <div className="inline-block bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl text-blue-950 font-mono font-bold text-base">
-            📅 {torneo?.fechaEvento ? new Date(torneo.fechaEvento + "T12:00:00").toLocaleDateString("es-HN", { dateStyle: "long" }) : "Próximamente"}
+            📅 {formatearFechaEvento(torneo?.fechaEvento)}
           </div>
           <p className="text-xs text-gray-400">
             ¡Prepárate con tu equipo! Los administradores publicarán los goles en directo desde la cancha.
@@ -174,9 +214,7 @@ export default function TorneoEnVivo() {
             <span>Cuadro del Torneo — {categoriaSeleccionada}</span>
           </h3>
           <span className="text-[11px] text-gray-400 font-mono">
-            {bracketActual?.actualizadoEn
-              ? `Actualizado: ${new Date(bracketActual.actualizadoEn).toLocaleTimeString("es-HN")}`
-              : "En espera"}
+            {formatearHoraActualizado(bracketActual?.actualizadoEn)}
           </span>
         </div>
 
@@ -247,9 +285,10 @@ export default function TorneoEnVivo() {
             </p>
           ) : (
             criteriosPremios.map((crit) => {
-              const registros = Object.values(crit.registros || {}).sort((a, b) => b.valor - a.valor);
+              if (!crit) return null;
+              const registros = Object.values(crit.registros || {}).sort((a, b) => (b.valor || 0) - (a.valor || 0));
               return (
-                <div key={crit.id} className="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 space-y-2">
+                <div key={crit.id || crit.nombre} className="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 space-y-2">
                   <div className="flex items-center gap-2 text-xs font-bold text-blue-950">
                     <span className="text-base">{crit.icono || "🏆"}</span>
                     <span>{crit.nombre}</span>
@@ -260,7 +299,7 @@ export default function TorneoEnVivo() {
                   ) : (
                     <div className="space-y-1.5 pt-1">
                       {registros.slice(0, 3).map((r, rIdx) => (
-                        <div key={r.jugadorId} className="flex justify-between items-center text-xs bg-white p-2 rounded-lg border border-gray-100">
+                        <div key={r.jugadorId || rIdx} className="flex justify-between items-center text-xs bg-white p-2 rounded-lg border border-gray-100">
                           <span className="font-medium text-gray-800">
                             {rIdx === 0 ? "🥇 " : rIdx === 1 ? "🥈 " : "🥉 "}
                             {r.nombre} ({r.nombreEquipo})

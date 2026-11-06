@@ -1,7 +1,7 @@
 "use client";
 
 export default function BracketTorneo({ bracketData, editableAdmin = false, onRegistrarGol, onCambiarGanador }) {
-  if (!bracketData) {
+  if (!bracketData || (!bracketData.rondas && !bracketData.jornadas && bracketData.tipo !== "triangular_final")) {
     return (
       <div className="bg-white p-8 rounded-2xl border text-center text-gray-400 text-xs sm:text-sm">
         Aún no se han generado los cruces para esta categoría.
@@ -62,31 +62,34 @@ export default function BracketTorneo({ bracketData, editableAdmin = false, onRe
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(tabla || []).map((fila, idx) => (
-                  <tr key={fila.id || idx} className={`hover:bg-gray-50 ${idx < 2 ? "bg-purple-50/40" : ""}`}>
-                    <td className="p-2.5 font-bold font-mono text-center">{idx + 1}</td>
-                    <td className="p-2.5 font-bold text-gray-900 flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full border" style={{ backgroundColor: fila.color || "#cbd5e1" }} />
-                      <span>{fila.nombre}</span>
-                    </td>
-                    <td className="p-2.5 text-center font-mono">{fila.pj}</td>
-                    <td className="p-2.5 text-center font-mono">{fila.pg}</td>
-                    <td className="p-2.5 text-center font-mono">{fila.pp}</td>
-                    <td className="p-2.5 text-center font-mono">{fila.gf}</td>
-                    <td className="p-2.5 text-center font-mono">{fila.gc}</td>
-                    <td className="p-2.5 text-center font-mono font-semibold">{fila.dg > 0 ? `+${fila.dg}` : fila.dg}</td>
-                    <td className="p-2.5 text-center font-mono font-black text-blue-950 bg-blue-50/80">{fila.pts}</td>
-                    <td className="p-2.5 text-center">
-                      {idx < 2 ? (
-                        <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                          Zona Final
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-gray-400">Eliminada</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {(tabla || []).map((fila, idx) => {
+                  if (!fila) return null;
+                  return (
+                    <tr key={fila.id || idx} className={`hover:bg-gray-50 ${idx < 2 ? "bg-purple-50/40" : ""}`}>
+                      <td className="p-2.5 font-bold font-mono text-center">{idx + 1}</td>
+                      <td className="p-2.5 font-bold text-gray-900 flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full border" style={{ backgroundColor: fila.color || "#cbd5e1" }} />
+                        <span>{fila.nombre}</span>
+                      </td>
+                      <td className="p-2.5 text-center font-mono">{fila.pj}</td>
+                      <td className="p-2.5 text-center font-mono">{fila.pg}</td>
+                      <td className="p-2.5 text-center font-mono">{fila.pp}</td>
+                      <td className="p-2.5 text-center font-mono">{fila.gf}</td>
+                      <td className="p-2.5 text-center font-mono">{fila.gc}</td>
+                      <td className="p-2.5 text-center font-mono font-semibold">{fila.dg > 0 ? `+${fila.dg}` : fila.dg}</td>
+                      <td className="p-2.5 text-center font-mono font-black text-blue-950 bg-blue-50/80">{fila.pts}</td>
+                      <td className="p-2.5 text-center">
+                        {idx < 2 ? (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                            Zona Final
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-gray-400">Eliminada</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -100,7 +103,7 @@ export default function BracketTorneo({ bracketData, editableAdmin = false, onRe
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {(jornadas || []).map((partido, i) => (
               <TarjetaPartido
-                key={partido.id || i}
+                key={partido?.id || i}
                 partido={partido}
                 editableAdmin={editableAdmin}
                 onRegistrarGol={onRegistrarGol}
@@ -150,31 +153,34 @@ export default function BracketTorneo({ bracketData, editableAdmin = false, onRe
       {/* Rondas Horizontales con Scroll */}
       <div className="overflow-x-auto pb-4">
         <div className="flex items-start gap-4 sm:gap-6 min-w-[700px]">
-          {(rondas || []).map((ronda, rIdx) => (
-            <div key={rIdx} className="flex-1 min-w-[240px] space-y-3">
-              <div className="bg-blue-950 text-white text-center py-2 px-3 rounded-xl shadow-sm">
-                <span className="text-xs font-black uppercase tracking-wider block">
-                  {ronda.nombreRonda}
-                </span>
-                <span className="text-[10px] text-blue-200">
-                  {ronda.partidos.length} {ronda.partidos.length === 1 ? "Encuentro" : "Partidos"}
-                </span>
-              </div>
+          {(rondas || []).map((ronda, rIdx) => {
+            const partidosRonda = ronda?.partidos || [];
+            return (
+              <div key={rIdx} className="flex-1 min-w-[240px] space-y-3">
+                <div className="bg-blue-950 text-white text-center py-2 px-3 rounded-xl shadow-sm">
+                  <span className="text-xs font-black uppercase tracking-wider block">
+                    {ronda?.nombreRonda || `Ronda ${rIdx + 1}`}
+                  </span>
+                  <span className="text-[10px] text-blue-200">
+                    {partidosRonda.length} {partidosRonda.length === 1 ? "Encuentro" : "Partidos"}
+                  </span>
+                </div>
 
-              <div className="space-y-3">
-                {ronda.partidos.map((partido) => (
-                  <TarjetaPartido
-                    key={partido.id}
-                    partido={partido}
-                    esFinal={rIdx === rondas.length - 1}
-                    editableAdmin={editableAdmin}
-                    onRegistrarGol={onRegistrarGol}
-                    onCambiarGanador={onCambiarGanador}
-                  />
-                ))}
+                <div className="space-y-3">
+                  {partidosRonda.map((partido, pIdx) => (
+                    <TarjetaPartido
+                      key={partido?.id || pIdx}
+                      partido={partido}
+                      esFinal={rIdx === (rondas || []).length - 1}
+                      editableAdmin={editableAdmin}
+                      onRegistrarGol={onRegistrarGol}
+                      onCambiarGanador={onCambiarGanador}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -182,6 +188,7 @@ export default function BracketTorneo({ bracketData, editableAdmin = false, onRe
 }
 
 function TarjetaPartido({ partido, esFinal = false, editableAdmin, onRegistrarGol, onCambiarGanador }) {
+  if (!partido) return null;
   const { equipo1, equipo2, goles1, goles2, penales1, penales2, estado, ganador, goleadores, nombre } = partido;
 
   const esBye = equipo2?.esBye;
@@ -217,8 +224,8 @@ function TarjetaPartido({ partido, esFinal = false, editableAdmin, onRegistrarGo
           <span className="truncate">{equipo1?.nombre || "Por definir"}</span>
         </div>
         <div className="flex items-center gap-1 font-mono font-bold">
-          {goles1 !== null ? <span>{goles1}</span> : <span className="text-gray-300">-</span>}
-          {penales1 !== null && <span className="text-[10px] text-gray-400">({penales1})</span>}
+          {goles1 !== null && goles1 !== undefined ? <span>{goles1}</span> : <span className="text-gray-300">-</span>}
+          {penales1 !== null && penales1 !== undefined && <span className="text-[10px] text-gray-400">({penales1})</span>}
         </div>
       </div>
 
@@ -238,23 +245,23 @@ function TarjetaPartido({ partido, esFinal = false, editableAdmin, onRegistrarGo
         <div className="flex items-center gap-1 font-mono font-bold">
           {esBye ? (
             <span className="text-[10px] text-emerald-700 font-bold">BYE</span>
-          ) : goles2 !== null ? (
+          ) : goles2 !== null && goles2 !== undefined ? (
             <span>{goles2}</span>
           ) : (
             <span className="text-gray-300">-</span>
           )}
-          {penales2 !== null && <span className="text-[10px] text-gray-400">({penales2})</span>}
+          {penales2 !== null && penales2 !== undefined && <span className="text-[10px] text-gray-400">({penales2})</span>}
         </div>
       </div>
 
       {/* Detalle de Goleadores (si existen) */}
-      {goleadores && goleadores.length > 0 && (
+      {Array.isArray(goleadores) && goleadores.length > 0 && (
         <div className="mt-2 pt-1.5 border-t border-gray-100 text-[10px] text-gray-500">
           <span className="font-bold block text-blue-950 mb-0.5">⚽ Goles anotados:</span>
           <div className="flex flex-wrap gap-1">
             {goleadores.map((g, idx) => (
               <span key={idx} className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">
-                {g.nombreJugador} ({g.minuto ? `${g.minuto}'` : `x${g.cantidad || 1}`})
+                {g?.nombreJugador} ({g?.minuto ? `${g.minuto}'` : `x${g?.cantidad || 1}`})
               </span>
             ))}
           </div>

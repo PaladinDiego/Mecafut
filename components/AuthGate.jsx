@@ -217,9 +217,9 @@ export default function AuthGate({ children }) {
                     : `Código OTP generado para ${correo}`}
                 </span>
 
-                {otpInfo?.codigoOtp && (
+                {process.env.NODE_ENV !== "production" && otpInfo?.codigoOtp && (
                   <div className="mt-2 p-2 bg-white border border-emerald-300 rounded-lg inline-flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Código de prueba:</span>
+                    <span className="text-xs text-gray-500">Código de prueba (Dev):</span>
                     <strong className="text-base font-mono tracking-widest text-emerald-950">
                       {otpInfo.codigoOtp}
                     </strong>

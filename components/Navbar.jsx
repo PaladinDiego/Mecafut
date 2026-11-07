@@ -7,6 +7,7 @@ import {
   cerrarSesion
 } from "../lib/authService";
 import { obtenerEstadoTorneo, suscribirTorneoEnVivo } from "../lib/dbService";
+import ModalBetaAlert from "./ModalBetaAlert";
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -64,11 +65,16 @@ export default function Navbar() {
     window.dispatchEvent(new CustomEvent("mecafut_abrir_reglamento"));
   };
 
+  const abrirReporteProblema = () => {
+    window.dispatchEvent(new CustomEvent("mecafut_abrir_reporte"));
+  };
+
   const esAdmin = sesion?.rol === "admin";
   const mostrarEnlaceTorneo = torneoVisible || esAdmin;
 
   return (
     <header>
+      <ModalBetaAlert />
       <nav className="bg-blue-950 text-white p-4 shadow-md sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex flex-wrap justify-between items-center gap-3">
           <Link href="/" className="flex items-center gap-2 hover:opacity-90 transition">
@@ -127,6 +133,18 @@ export default function Navbar() {
             >
               <span>📋</span>
               <span className="hidden sm:inline">Reglamento</span>
+            </button>
+
+            {/* Botón Permanente de Reportar Problema (Follow-up 2) */}
+            <button
+              type="button"
+              onClick={abrirReporteProblema}
+              className="bg-red-900/60 hover:bg-red-800 text-red-100 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border border-red-700/60 shadow-sm"
+              title="Reportar un problema técnico o error en la plataforma"
+            >
+              <span>⚠️</span>
+              <span className="hidden sm:inline">Reportar Problema</span>
+              <span className="sm:hidden">Reportar</span>
             </button>
 
             {/* Botón Administrador: Solo para rol 'admin' */}

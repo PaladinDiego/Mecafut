@@ -11,10 +11,14 @@ import {
   actualizarConfigVisibilidadTorneo,
   crearCriterioPremio,
   eliminarCriterioPremio,
-  ajustarConteoCriterio
+  ajustarConteoCriterio,
+  actualizarDocumentoJugador,
+  comprimirDocumento,
+  actualizarEnlaceWhatsapp,
+  esJugadorHabilitado
 } from "../../lib/dbService";
 import { exportarExcelOficial, exportarPDFPlanillas } from "../../lib/exportUtils";
-import { CONFIG_TORNEO } from "../../lib/torneoConfig";
+import { CONFIG_TORNEO, esDocenteAutorizado } from "../../lib/torneoConfig";
 import { obtenerSesionActual, verificarOtp } from "../../lib/authService";
 import {
   generarBracketEliminacion,
@@ -22,6 +26,21 @@ import {
   propagarGanadorEliminacion
 } from "../../lib/bracketUtils";
 import BracketTorneo from "../../components/BracketTorneo";
+
+export function esEquipoAptoParaLlaves(equipo, todosJugadores = []) {
+  if (!equipo) return false;
+  const estadoPago = (equipo.estado || "Pendiente").toLowerCase();
+  const pagoAprobado =
+    equipo.pagoConfirmado === true ||
+    estadoPago === "confirmado" ||
+    estadoPago === "pagado" ||
+    estadoPago === "aprobado";
+  if (!pagoAprobado) return false;
+
+  const integrantes = (todosJugadores || []).filter((j) => j.equipoId === equipo.id);
+  const habilitados = integrantes.filter(esJugadorHabilitado).length;
+  return habilitados >= CONFIG_TORNEO.plantilla.min;
+}
 
 export default function Admin() {
   const [isLogged, setIsLogged] = useState(false);
@@ -55,6 +74,40 @@ export default function Admin() {
   const [nuevoCriterioNombre, setNuevoCriterioNombre] = useState("");
   const [nuevoCriterioIcono, setNuevoCriterioIcono] = useState("🏆");
 
+  // F13: Estados para Editor de Enlace de WhatsApp
+  const [urlWhatsappInput, setUrlWhatsappInput] = useState("");
+  const [guardandoWhatsapp, setGuardandoWhatsapp] = useState(false);
+  const [mensajeWhatsapp, setMensajeWhatsapp] = useState(null);
+
+  // F10: Estados para Modal de Subida / Cambio de Carnet
+  const [modalCarnetJugador, setModalCarnetJugador] = useState(null);
+  const [carnetDataUrl, setCarnetDataUrl] = useState(null);
+  const [subiendoCarnet, setSubiendoCarnet] = useState(false);
+  const [carnetError, setCarnetError] = useState("");
+
+  // F12: Estados para Modal de Armado Manual de Llaves
+  const [modalArmadoManual, setModalArmadoManual] = useState(false);
+  const [tabArmadoManual, setTabArmadoManual] = useState("Masculino");
+  const [manualMasc, setManualMasc] = useState({
+    bye1: "",
+    bye2: "",
+    bye3: "",
+    bye4: "",
+    p1a: "",
+    p1b: "",
+    p2a: "",
+    p2b: "",
+    p3a: "",
+    p3b: "",
+    p4a: "",
+    p4b: ""
+  });
+  const [manualFem, setManualFem] = useState({
+    eq1: "",
+    eq2: "",
+    eq3: ""
+  });
+
   const [sesionActual, setSesionActual] = useState(null);
 
   useEffect(() => {
@@ -66,13 +119,23 @@ export default function Admin() {
     }
   }, []);
 
+  useEffect(() => {
+    if (configuracion?.whatsappCapitanesUrl) {
+      setUrlWhatsappInput(configuracion.whatsappCapitanesUrl);
+    }
+  }, [configuracion?.whatsappCapitanesUrl]);
+
   const fetchData = async () => {
     setLoading(true);
     try {
       const data = await obtenerDatosAdmin();
       setJugadores(data.jugadores || []);
       setEquipos(data.equipos || []);
-      setConfiguracion(data.configuracion || { inscripcionesAbiertas: true });
+      const cfg = data.configuracion || { inscripcionesAbiertas: true };
+      setConfiguracion(cfg);
+      if (cfg.whatsappCapitanesUrl) {
+        setUrlWhatsappInput(cfg.whatsappCapitanesUrl);
+      }
       setTorneo(data.torneo || null);
       setModo(data.modo);
     } catch (err) {
@@ -120,16 +183,119 @@ export default function Admin() {
   };
 
   // ========================================================
-  // LÓGICA DE SORTEO Y GENERACIÓN DE LLAVES (Requisito 2)
+  // F13: GESTIÓN DEL ENLACE DE WHATSAPP DE CAPITANES
+  // ========================================================
+  const handleGuardarWhatsapp = async (e) => {
+    if (e) e.preventDefault();
+    const urlLimpia = (urlWhatsappInput || "").trim();
+    if (!urlLimpia.startsWith("https://")) {
+      alert("El enlace debe ser seguro y comenzar con https:// (ej. https://chat.whatsapp.com/...)");
+      return;
+    }
+
+    setGuardandoWhatsapp(true);
+    setMensajeWhatsapp(null);
+    try {
+      await actualizarEnlaceWhatsapp(urlLimpia);
+      setConfiguracion((prev) => ({ ...prev, whatsappCapitanesUrl: urlLimpia }));
+      setMensajeWhatsapp({ tipo: "exito", texto: "¡Enlace de WhatsApp actualizado con éxito!" });
+      setTimeout(() => setMensajeWhatsapp(null), 4000);
+    } catch (err) {
+      alert("Error al guardar enlace de WhatsApp: " + err.message);
+    } finally {
+      setGuardandoWhatsapp(false);
+    }
+  };
+
+  const handleProbarWhatsapp = () => {
+    const url = (urlWhatsappInput || "").trim();
+    if (!url.startsWith("https://")) {
+      alert("Ingresa un enlace válido que comience con https:// para probarlo.");
+      return;
+    }
+    window.open(url, "_blank");
+  };
+
+  // ========================================================
+  // F10: GESTIÓN DE CARNETS Y MATRÍCULAS EN EL PADRÓN
+  // ========================================================
+  const abrirModalCarnet = (jugador) => {
+    setModalCarnetJugador(jugador);
+    setCarnetDataUrl(jugador.fotoDocumento || jugador.foto_documento || null);
+    setCarnetError("");
+  };
+
+  const handleArchivoCarnetChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSubiendoCarnet(true);
+    setCarnetError("");
+    try {
+      const dataUrl = await comprimirDocumento(file);
+      if (!dataUrl) {
+        setCarnetError("No se pudo procesar la imagen o documento. Intenta con otro archivo.");
+      } else {
+        setCarnetDataUrl(dataUrl);
+      }
+    } catch (err) {
+      setCarnetError("Error al procesar el archivo: " + err.message);
+    } finally {
+      setSubiendoCarnet(false);
+    }
+  };
+
+  const handleGuardarCarnet = async (e) => {
+    e.preventDefault();
+    if (!modalCarnetJugador || !carnetDataUrl) {
+      alert("Por favor selecciona una foto de carnet o matrícula.");
+      return;
+    }
+    setSubiendoCarnet(true);
+    try {
+      await actualizarDocumentoJugador({
+        jugadorId: modalCarnetJugador.id,
+        fotoDocumento: carnetDataUrl,
+        tipoDocumento: "carnet"
+      });
+
+      // Actualizar estado local inmediatamente para reflejo instantáneo en la UI
+      setJugadores((prev) =>
+        prev.map((j) =>
+          j.id === modalCarnetJugador.id
+            ? {
+                ...j,
+                fotoDocumento: carnetDataUrl,
+                foto_documento: carnetDataUrl,
+                estado: "Aprobado"
+              }
+            : j
+        )
+      );
+      setEquipos((prev) => [...prev]);
+      alert(`¡Carnet de ${modalCarnetJugador.nombre} actualizado y verificado con éxito!`);
+      setModalCarnetJugador(null);
+      setCarnetDataUrl(null);
+    } catch (err) {
+      alert("Error guardando carnet: " + err.message);
+    } finally {
+      setSubiendoCarnet(false);
+    }
+  };
+
+  // ========================================================
+  // F11 & F12: LÓGICA DE SORTEO Y GENERACIÓN DE LLAVES
   // ========================================================
   const generarCrucesTorneo = async (aleatorio = false) => {
     const categoria = categoriaSorteo;
-    const equiposAptos = equipos.filter(
-      (e) => (e.categoria || "Masculino") === categoria && e.estado !== "Rechazado"
+    const equiposCategoria = equipos.filter(
+      (e) => (e.categoria || "Masculino") === categoria
     );
+    const equiposAptos = equiposCategoria.filter((e) => esEquipoAptoParaLlaves(e, jugadores));
 
     if (equiposAptos.length < 2) {
-      alert(`Se requieren al menos 2 equipos en la categoría ${categoria} para armar el torneo.`);
+      alert(
+        `Se requieren al menos 2 equipos elegibles (pago confirmado y mínimo ${CONFIG_TORNEO.plantilla.min} carnets verificados) en la categoría ${categoria} para armar el torneo.`
+      );
       return;
     }
 
@@ -147,6 +313,116 @@ export default function Admin() {
       alert(`¡Cruces generados con éxito para la categoría ${categoria}!`);
     } catch (err) {
       alert("Error guardando cruces: " + err.message);
+    }
+  };
+
+  // F12: Armado Manual Interactivo de Llaves
+  const abrirModalArmadoManual = () => {
+    setTabArmadoManual(categoriaSorteo || "Masculino");
+    setModalArmadoManual(true);
+  };
+
+  const handleAutocompletarManual = (cat) => {
+    if (cat === "Masculino") {
+      const aptos = equipos.filter(
+        (e) => (e.categoria || "Masculino") === "Masculino" && esEquipoAptoParaLlaves(e, jugadores)
+      );
+      if (aptos.length < 1) {
+        alert("No hay equipos masculinos elegibles registrados.");
+        return;
+      }
+      setManualMasc({
+        bye1: aptos[0]?.id || "",
+        bye2: aptos[1]?.id || "",
+        bye3: aptos[2]?.id || "",
+        bye4: aptos[3]?.id || "",
+        p1a: aptos[4]?.id || "",
+        p1b: aptos[5]?.id || "",
+        p2a: aptos[6]?.id || "",
+        p2b: aptos[7]?.id || "",
+        p3a: aptos[8]?.id || "",
+        p3b: aptos[9]?.id || "",
+        p4a: aptos[10]?.id || "",
+        p4b: aptos[11]?.id || ""
+      });
+    } else {
+      const aptos = equipos.filter(
+        (e) => e.categoria === "Femenino" && esEquipoAptoParaLlaves(e, jugadores)
+      );
+      if (aptos.length < 1) {
+        alert("No hay equipos femeninos elegibles registrados.");
+        return;
+      }
+      setManualFem({
+        eq1: aptos[0]?.id || "",
+        eq2: aptos[1]?.id || "",
+        eq3: aptos[2]?.id || ""
+      });
+    }
+  };
+
+  const handleGuardarManualMasculino = async (e) => {
+    e.preventDefault();
+    const keys = ["bye1", "bye2", "bye3", "bye4", "p1a", "p1b", "p2a", "p2b", "p3a", "p3b", "p4a", "p4b"];
+    const ids = keys.map((k) => manualMasc[k]);
+
+    if (ids.some((id) => !id)) {
+      alert("Debes seleccionar los 12 equipos para los pases directos y los 4 partidos preliminares.");
+      return;
+    }
+
+    const setIds = new Set(ids);
+    if (setIds.size !== 12) {
+      alert("Error de validación: Hay equipos repetidos en la selección. Cada uno de los 12 equipos debe ser único.");
+      return;
+    }
+
+    const orderedTeams = ids.map((id) => equipos.find((eq) => eq.id === id)).filter(Boolean);
+    if (orderedTeams.length !== 12) {
+      alert("Error al cargar los datos de los equipos seleccionados.");
+      return;
+    }
+
+    try {
+      const bracket = generarBracketEliminacion(orderedTeams, false);
+      const actualizado = await guardarBracketCategoria("Masculino", bracket);
+      setTorneo(actualizado);
+      setModalArmadoManual(false);
+      alert("¡Llave Masculina armada y publicada con éxito!");
+    } catch (err) {
+      alert("Error guardando llave masculina: " + err.message);
+    }
+  };
+
+  const handleGuardarManualFemenino = async (e) => {
+    e.preventDefault();
+    const ids = [manualFem.eq1, manualFem.eq2, manualFem.eq3];
+
+    if (ids.some((id) => !id)) {
+      alert("Debes seleccionar los 3 equipos para el Triangular Femenino.");
+      return;
+    }
+
+    const setIds = new Set(ids);
+    if (setIds.size !== 3) {
+      alert("Error de validación: Hay equipos repetidos en la selección. Los 3 equipos del Triangular deben ser únicos.");
+      return;
+    }
+
+    const orderedTeams = ids.map((id) => equipos.find((eq) => eq.id === id)).filter(Boolean);
+    if (orderedTeams.length !== 3) {
+      alert("Error al cargar los datos de los equipos femeninos seleccionados.");
+      return;
+    }
+
+    try {
+      const bracket = generarTriangularFemenino(orderedTeams, false);
+      const actualizado = await guardarBracketCategoria("Femenino", bracket);
+      setTorneo(actualizado);
+      setModalArmadoManual(false);
+      alert("¡Triangular Femenino armado y publicado con éxito!");
+    } catch (err) {
+      alert("Error guardando triangular femenino: " + err.message);
     }
   };
 
@@ -408,6 +684,362 @@ export default function Admin() {
         </div>
       )}
 
+      {/* F10: Modal para Subir o Cambiar Carnet en el Padrón */}
+      {modalCarnetJugador && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-blue-950 text-left animate-fade-in">
+            <div className="flex justify-between items-center mb-3 border-b pb-2">
+              <div>
+                <h3 className="text-base font-black text-blue-950">
+                  {modalCarnetJugador.fotoDocumento || modalCarnetJugador.foto_documento
+                    ? "✏️ Cambiar Carnet o Matrícula"
+                    : "🪪 Subir Carnet o Matrícula"}
+                </h3>
+                <p className="text-xs text-gray-500 font-semibold">
+                  {modalCarnetJugador.nombre} ({modalCarnetJugador.cuenta})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalCarnetJugador(null);
+                  setCarnetDataUrl(null);
+                }}
+                className="text-gray-400 hover:text-gray-700 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarCarnet} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Foto del Carnet Estudiantil o Comprobante de Matrícula:
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={handleArchivoCarnetChange}
+                  className="w-full text-xs text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-100 file:text-blue-900 hover:file:bg-blue-200 cursor-pointer border rounded-xl p-1"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Se comprime automáticamente en el navegador a formato ligero de alta legibilidad.
+                </p>
+              </div>
+
+              {carnetError && (
+                <p className="text-xs text-red-600 bg-red-50 p-2.5 rounded-xl border border-red-200">
+                  {carnetError}
+                </p>
+              )}
+
+              {carnetDataUrl && (
+                <div className="border rounded-2xl p-2 bg-gray-50 text-center">
+                  <span className="text-[10px] text-gray-500 font-semibold block mb-1">
+                    Vista Previa del Carnet:
+                  </span>
+                  <img
+                    src={carnetDataUrl}
+                    alt="Carnet Preview"
+                    className="max-h-48 mx-auto rounded-xl border shadow-sm object-contain"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={subiendoCarnet}
+                  onClick={() => {
+                    setModalCarnetJugador(null);
+                    setCarnetDataUrl(null);
+                  }}
+                  className="w-1/3 border py-2.5 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={subiendoCarnet || !carnetDataUrl}
+                  className="w-2/3 bg-blue-950 hover:bg-blue-900 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs transition shadow flex items-center justify-center gap-1.5"
+                >
+                  <span>{subiendoCarnet ? "⏳" : "💾"}</span>
+                  <span>{subiendoCarnet ? "Procesando..." : "Guardar y Habilitar"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* F12: Modal Interactivo de Armado Manual de Llaves */}
+      {modalArmadoManual && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border-2 border-blue-950 text-left animate-fade-in">
+            <div className="flex justify-between items-center mb-4 border-b pb-3">
+              <div>
+                <h3 className="text-lg font-black text-blue-950 flex items-center gap-2">
+                  <span>🎯</span> Armado Manual de Llaves del Torneo
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Selecciona y empareja manualmente los equipos elegibles en los slots del bracket oficial.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalArmadoManual(false)}
+                className="text-gray-400 hover:text-gray-700 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Pestañas de Categoría dentro del Modal */}
+            <div className="flex gap-2 border-b mb-4">
+              <button
+                type="button"
+                onClick={() => setTabArmadoManual("Masculino")}
+                className={`pb-2 px-4 text-xs font-bold border-b-2 transition ${
+                  tabArmadoManual === "Masculino"
+                    ? "border-blue-950 text-blue-950 font-black"
+                    : "border-transparent text-gray-400"
+                }`}
+              >
+                Categoría Masculina (12 Equipos — 4 BYEs + 4 Preliminares)
+              </button>
+              <button
+                type="button"
+                onClick={() => setTabArmadoManual("Femenino")}
+                className={`pb-2 px-4 text-xs font-bold border-b-2 transition ${
+                  tabArmadoManual === "Femenino"
+                    ? "border-blue-950 text-blue-950 font-black"
+                    : "border-transparent text-gray-400"
+                }`}
+              >
+                Categoría Femenina (Triangular 3 Equipos)
+              </button>
+            </div>
+
+            {/* Formulario Masculino */}
+            {tabArmadoManual === "Masculino" && (
+              <form onSubmit={handleGuardarManualMasculino} className="space-y-4">
+                {(() => {
+                  const aptosMasc = equipos.filter(
+                    (e) => (e.categoria || "Masculino") === "Masculino" && esEquipoAptoParaLlaves(e, jugadores)
+                  );
+                  return (
+                    <>
+                      <div className="flex flex-wrap justify-between items-center gap-2">
+                        <span className="text-xs text-gray-600">
+                          Equipos masculinos elegibles registrados: <strong>{aptosMasc.length}</strong> (mínimo 8 carnets + pago)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleAutocompletarManual("Masculino")}
+                          className="bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1"
+                        >
+                          <span>⚡</span> Autocompletar con elegibles
+                        </button>
+                      </div>
+
+                      {aptosMasc.length < 12 && (
+                        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-2xl text-xs">
+                          ⚠️ Hay <strong>{aptosMasc.length}</strong> equipos masculinos elegibles (se requieren 12 para el bracket completo).
+                          Puedes habilitar más equipos subiendo sus carnets faltantes en la pestaña &quot;Padrón de Jugadores&quot;.
+                        </div>
+                      )}
+
+                      {/* 4 BYEs Directos */}
+                      <div className="bg-amber-50/70 p-4 rounded-2xl border border-amber-200 space-y-3">
+                        <h4 className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                          <span>⭐</span> Pases Directos a Cuartos de Final (4 BYEs)
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {[
+                            { key: "bye1", label: "Pase Directo 1 (BYE Slot 1)" },
+                            { key: "bye2", label: "Pase Directo 2 (BYE Slot 2)" },
+                            { key: "bye3", label: "Pase Directo 3 (BYE Slot 3)" },
+                            { key: "bye4", label: "Pase Directo 4 (BYE Slot 4)" }
+                          ].map((slot) => (
+                            <div key={slot.key}>
+                              <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                                {slot.label}:
+                              </label>
+                              <select
+                                required
+                                value={manualMasc[slot.key]}
+                                onChange={(e) => setManualMasc({ ...manualMasc, [slot.key]: e.target.value })}
+                                className="w-full border border-gray-300 p-2 rounded-xl text-xs bg-white font-semibold"
+                              >
+                                <option value="">-- Seleccionar Equipo --</option>
+                                {aptosMasc.map((eq) => (
+                                  <option key={eq.id} value={eq.id}>
+                                    {eq.nombre}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 4 Partidos Preliminares */}
+                      <div className="bg-blue-50/70 p-4 rounded-2xl border border-blue-200 space-y-3">
+                        <h4 className="text-xs font-black text-blue-950 flex items-center gap-1.5">
+                          <span>⚔️</span> Cruces Ronda Preliminar (4 Partidos — 8 Equipos)
+                        </h4>
+                        <div className="space-y-3">
+                          {[
+                            { num: 1, kA: "p1a", kB: "p1b" },
+                            { num: 2, kA: "p2a", kB: "p2b" },
+                            { num: 3, kA: "p3a", kB: "p3b" },
+                            { num: 4, kA: "p4a", kB: "p4b" }
+                          ].map((partido) => (
+                            <div
+                              key={partido.num}
+                              className="bg-white p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-center gap-2"
+                            >
+                              <span className="font-bold text-xs text-blue-950 w-28 shrink-0">
+                                Partido {partido.num}:
+                              </span>
+                              <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <select
+                                  required
+                                  value={manualMasc[partido.kA]}
+                                  onChange={(e) => setManualMasc({ ...manualMasc, [partido.kA]: e.target.value })}
+                                  className="w-full border border-gray-300 p-2 rounded-xl text-xs bg-white font-semibold"
+                                >
+                                  <option value="">-- Equipo Local (A) --</option>
+                                  {aptosMasc.map((eq) => (
+                                    <option key={eq.id} value={eq.id}>
+                                      {eq.nombre}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <select
+                                  required
+                                  value={manualMasc[partido.kB]}
+                                  onChange={(e) => setManualMasc({ ...manualMasc, [partido.kB]: e.target.value })}
+                                  className="w-full border border-gray-300 p-2 rounded-xl text-xs bg-white font-semibold"
+                                >
+                                  <option value="">-- Equipo Visitante (B) --</option>
+                                  {aptosMasc.map((eq) => (
+                                    <option key={eq.id} value={eq.id}>
+                                      {eq.nombre}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setModalArmadoManual(false)}
+                          className="border px-4 py-2.5 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="bg-blue-950 hover:bg-blue-900 text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow flex items-center gap-1.5"
+                        >
+                          <span>💾</span> Guardar y Publicar Llave Masculina
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </form>
+            )}
+
+            {/* Formulario Femenino */}
+            {tabArmadoManual === "Femenino" && (
+              <form onSubmit={handleGuardarManualFemenino} className="space-y-4">
+                {(() => {
+                  const aptosFem = equipos.filter(
+                    (e) => e.categoria === "Femenino" && esEquipoAptoParaLlaves(e, jugadores)
+                  );
+                  return (
+                    <>
+                      <div className="flex flex-wrap justify-between items-center gap-2">
+                        <span className="text-xs text-gray-600">
+                          Equipos femeninos elegibles registrados: <strong>{aptosFem.length}</strong> (mínimo 8 carnets + pago)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleAutocompletarManual("Femenino")}
+                          className="bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1"
+                        >
+                          <span>⚡</span> Autocompletar con elegibles
+                        </button>
+                      </div>
+
+                      {aptosFem.length < 3 && (
+                        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-2xl text-xs">
+                          ⚠️ Hay <strong>{aptosFem.length}</strong> equipos femeninos elegibles (se requieren 3 para el Triangular).
+                          Puedes habilitar más equipos subiendo carnets o confirmando pagos.
+                        </div>
+                      )}
+
+                      <div className="bg-pink-50/70 p-4 rounded-2xl border border-pink-200 space-y-3">
+                        <h4 className="text-xs font-black text-pink-950 flex items-center gap-1.5">
+                          <span>🌸</span> Equipos del Triangular Todos contra Todos (3 Equipos)
+                        </h4>
+                        {[
+                          { key: "eq1", label: "Equipo 1 (Jornada 1 vs Eq 2 / Jornada 3 vs Eq 3)" },
+                          { key: "eq2", label: "Equipo 2 (Jornada 1 vs Eq 1 / Jornada 2 vs Eq 3)" },
+                          { key: "eq3", label: "Equipo 3 (Jornada 2 vs Eq 2 / Jornada 3 vs Eq 1)" }
+                        ].map((slot) => (
+                          <div key={slot.key}>
+                            <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                              {slot.label}:
+                            </label>
+                            <select
+                              required
+                              value={manualFem[slot.key]}
+                              onChange={(e) => setManualFem({ ...manualFem, [slot.key]: e.target.value })}
+                              className="w-full border border-gray-300 p-2.5 rounded-xl text-xs bg-white font-semibold"
+                            >
+                              <option value="">-- Seleccionar Equipo Femenino --</option>
+                              {aptosFem.map((eq) => (
+                                <option key={eq.id} value={eq.id}>
+                                  {eq.nombre}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setModalArmadoManual(false)}
+                          className="border px-4 py-2.5 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="bg-blue-950 hover:bg-blue-900 text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow flex items-center gap-1.5"
+                        >
+                          <span>💾</span> Guardar y Publicar Triangular Femenino
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Modal Anotar Gol */}
       {modalGolPartido && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
@@ -585,10 +1217,9 @@ export default function Admin() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-blue-950">Panel Administrativo</h1>
-            <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
-              modo === "firebase" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
-            }`}>
-              {modo === "firebase" ? "Cloud Firestore" : "Modo Simulado"}
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800 inline-flex items-center gap-1 shadow-sm">
+              <span>🟢</span>
+              <span>{modo === "supabase" || modo === "firebase" ? "Servidor Cloud Activo" : "Servidor Oficial MECAFUT"}</span>
             </span>
           </div>
           <p className="text-xs text-gray-500">Control de inscripciones, planillas, cruces y estadísticas en directo</p>
@@ -664,6 +1295,58 @@ export default function Admin() {
           <div className="flex items-baseline gap-1 mt-0.5">
             <strong className="text-xl text-blue-950 font-black">{jugadores.length}</strong>
             <span className="text-xs text-gray-500">registrados</span>
+          </div>
+        </div>
+      </div>
+
+      {/* F13: Card Editor Oficial de Enlace de WhatsApp para Capitanes */}
+      <div className="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+        <div className="flex flex-wrap justify-between items-center gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">💬</span>
+            <div>
+              <h3 className="text-sm font-black text-blue-950">
+                Enlace Oficial del Grupo de WhatsApp para Capitanes
+              </h3>
+              <p className="text-[11px] text-gray-500">
+                Este link se presenta automáticamente a los capitanes en la confirmación de registro y en su portal de equipo.
+              </p>
+            </div>
+          </div>
+          {mensajeWhatsapp && (
+            <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-xl animate-fade-in">
+              ✅ {mensajeWhatsapp.texto}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="url"
+            placeholder="https://chat.whatsapp.com/..."
+            value={urlWhatsappInput}
+            onChange={(e) => setUrlWhatsappInput(e.target.value)}
+            className="flex-1 border border-gray-300 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-mono bg-white focus:outline-none focus:ring-2 focus:ring-blue-950"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={guardandoWhatsapp}
+              onClick={handleGuardarWhatsapp}
+              className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow flex items-center gap-1.5"
+            >
+              <span>💾</span>
+              <span>{guardandoWhatsapp ? "Guardando..." : "Guardar Enlace"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleProbarWhatsapp}
+              className="border border-blue-900 text-blue-900 hover:bg-blue-50 font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
+            >
+              <span>🔗</span>
+              <span>Probar Enlace</span>
+            </button>
           </div>
         </div>
       </div>
@@ -839,7 +1522,7 @@ export default function Admin() {
           {vistaPadron === "agrupado" ? (
             <div className="space-y-4">
               {equiposConJugadores.map((eq) => {
-                const conFoto = eq.plantilla.filter((j) => Boolean(j.fotoDocumento)).length;
+                const conFoto = eq.plantilla.filter((j) => esJugadorHabilitado(j)).length;
                 return (
                   <div key={eq.id} className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
                     {/* Cabecera del Equipo Agrupado */}
@@ -855,8 +1538,12 @@ export default function Admin() {
                         <span className="bg-gray-200 text-gray-800 font-mono font-bold px-2.5 py-0.5 rounded-full">
                           👥 {eq.plantilla.length} / 15 integrantes
                         </span>
-                        <span className="bg-purple-100 text-purple-900 font-bold px-2.5 py-0.5 rounded-full">
-                          🪪 {conFoto} / {eq.plantilla.length} con foto
+                        <span className={`font-bold px-2.5 py-0.5 rounded-full ${
+                          conFoto >= CONFIG_TORNEO.plantilla.min
+                            ? "bg-emerald-100 text-emerald-900"
+                            : "bg-amber-100 text-amber-900"
+                        }`}>
+                          🪪 {conFoto} / {eq.plantilla.length} verificados ({conFoto >= CONFIG_TORNEO.plantilla.min ? "Apto" : "Incompleto"})
                         </span>
                       </div>
                     </div>
@@ -870,7 +1557,7 @@ export default function Admin() {
                             <th className="p-3">Jugador</th>
                             <th className="p-3">Cuenta</th>
                             <th className="p-3">DNI</th>
-                            <th className="p-3">Verificación Documental (Foto)</th>
+                            <th className="p-3">Verificación de Carnet</th>
                             <th className="p-3">Correo</th>
                             <th className="p-3">Carrera</th>
                           </tr>
@@ -890,23 +1577,63 @@ export default function Admin() {
                               <td className="p-3 font-mono text-gray-600">{j.cuenta}</td>
                               <td className="p-3 font-mono text-gray-800 text-xs font-semibold">{j.dni || "N/A"}</td>
                               <td className="p-3">
-                                {j.fotoDocumento ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setVisorModal({
-                                      titulo: `Documento de ${j.nombre} (${j.tipoDocumento === "carnet" ? "Carnet" : "Matrícula"}) — ${eq.nombre}`,
-                                      url: j.fotoDocumento
-                                    })}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
-                                  >
-                                    <span>🪪</span>
-                                    <span>{j.tipoDocumento === "carnet" ? "Ver Carnet" : "Ver Matrícula"}</span>
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
-                                    ⚠️ Sin foto adjunta
-                                  </span>
-                                )}
+                                {(() => {
+                                  const tieneFoto = Boolean(j.fotoDocumento || j.foto_documento);
+                                  const esDocente = esDocenteAutorizado(j.correo);
+
+                                  if (tieneFoto) {
+                                    return (
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setVisorModal({
+                                              titulo: `Carnet de ${j.nombre} — ${eq.nombre}`,
+                                              url: j.fotoDocumento || j.foto_documento
+                                            })
+                                          }
+                                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
+                                        >
+                                          <span>🪪</span>
+                                          <span>Ver</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => abrirModalCarnet(j)}
+                                          className="border border-blue-800 text-blue-900 hover:bg-blue-50 text-[10px] font-bold px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
+                                        >
+                                          <span>✏️</span>
+                                          <span>Cambiar</span>
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+
+                                  if (esDocente) {
+                                    return (
+                                      <span className="text-[10px] text-blue-900 bg-blue-100 border border-blue-200 px-2.5 py-0.5 rounded-lg font-bold inline-flex items-center gap-1">
+                                        <span>👨‍🏫</span>
+                                        <span>Docente Exento</span>
+                                      </span>
+                                    );
+                                  }
+
+                                  return (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                                        ⚠️ Pendiente
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => abrirModalCarnet(j)}
+                                        className="bg-blue-950 hover:bg-blue-900 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
+                                      >
+                                        <span>+</span>
+                                        <span>Subir Carnet</span>
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="p-3 font-mono text-gray-500 text-xs">{j.correo || "N/A"}</td>
                               <td className="p-3 text-gray-700">{j.carrera}</td>
@@ -931,7 +1658,7 @@ export default function Admin() {
                       <th className="p-3">Jugador</th>
                       <th className="p-3">Cuenta</th>
                       <th className="p-3">DNI</th>
-                      <th className="p-3">Documento</th>
+                      <th className="p-3">Verificación de Carnet</th>
                       <th className="p-3">Correo</th>
                       <th className="p-3">Carrera</th>
                     </tr>
@@ -945,20 +1672,63 @@ export default function Admin() {
                         <td className="p-3 font-mono text-gray-600">{j.cuenta}</td>
                         <td className="p-3 font-mono text-gray-800 text-xs font-semibold">{j.dni || "N/A"}</td>
                         <td className="p-3">
-                          {j.fotoDocumento ? (
-                            <button
-                              type="button"
-                              onClick={() => setVisorModal({
-                                titulo: `Documento de ${j.nombre}`,
-                                url: j.fotoDocumento
-                              })}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2 py-0.5 rounded transition"
-                            >
-                              Ver Foto
-                            </button>
-                          ) : (
-                            <span className="text-[10px] text-gray-400">Sin foto</span>
-                          )}
+                          {(() => {
+                            const tieneFoto = Boolean(j.fotoDocumento || j.foto_documento);
+                            const esDocente = esDocenteAutorizado(j.correo);
+
+                            if (tieneFoto) {
+                              return (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setVisorModal({
+                                        titulo: `Carnet de ${j.nombre} — ${j.nombreEquipo || ""}`,
+                                        url: j.fotoDocumento || j.foto_documento
+                                      })
+                                    }
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
+                                  >
+                                    <span>🪪</span>
+                                    <span>Ver</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalCarnet(j)}
+                                    className="border border-blue-800 text-blue-900 hover:bg-blue-50 text-[10px] font-bold px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
+                                  >
+                                    <span>✏️</span>
+                                    <span>Cambiar</span>
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            if (esDocente) {
+                              return (
+                                <span className="text-[10px] text-blue-900 bg-blue-100 border border-blue-200 px-2.5 py-0.5 rounded-lg font-bold inline-flex items-center gap-1">
+                                  <span>👨‍🏫</span>
+                                  <span>Docente Exento</span>
+                                </span>
+                              );
+                            }
+
+                            return (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                                  ⚠️ Pendiente
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => abrirModalCarnet(j)}
+                                  className="bg-blue-950 hover:bg-blue-900 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
+                                >
+                                  <span>+</span>
+                                  <span>Subir Carnet</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="p-3 font-mono text-gray-500 text-xs">{j.correo || "N/A"}</td>
                         <td className="p-3 text-gray-700">{j.carrera}</td>
@@ -981,7 +1751,7 @@ export default function Admin() {
             <div>
               <h3 className="text-lg font-black text-blue-950">Generador de Cruces y Llaves</h3>
               <p className="text-xs text-gray-500">
-                Define los enfrentamientos aleatoriamente o ajusta cruces por categoría.
+                Define los enfrentamientos aleatoriamente o ajusta cruces por categoría con equipos elegibles (mínimo 8 carnets verificados y pago confirmado).
               </p>
             </div>
 
@@ -994,6 +1764,14 @@ export default function Admin() {
                 <option value="Masculino">Categoría Masculina</option>
                 <option value="Femenino">Categoría Femenina</option>
               </select>
+
+              <button
+                type="button"
+                onClick={() => abrirModalArmadoManual()}
+                className="bg-blue-950 hover:bg-blue-900 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow flex items-center gap-1.5"
+              >
+                <span>🎯</span> Armado Manual de Llaves
+              </button>
 
               <button
                 type="button"
@@ -1012,6 +1790,72 @@ export default function Admin() {
               </button>
             </div>
           </div>
+
+          {/* F11: Estado y Filtro de Elegibilidad de Equipos */}
+          {(() => {
+            const equiposCategoria = equipos.filter(
+              (e) => (e.categoria || "Masculino") === categoriaSorteo
+            );
+            const equiposAptos = equiposCategoria.filter((e) => esEquipoAptoParaLlaves(e, jugadores));
+            const equiposIncompletos = equiposCategoria.filter((e) => !esEquipoAptoParaLlaves(e, jugadores));
+
+            return (
+              <div className="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+                <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2">
+                  <h4 className="text-xs font-black text-blue-950 flex items-center gap-1.5">
+                    <span>🛡️</span> Estado de Elegibilidad para Llaves ({categoriaSorteo})
+                  </h4>
+                  <div className="flex items-center gap-2 text-[11px] font-bold">
+                    <span className="text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-lg">
+                      {equiposAptos.length} Elegibles
+                    </span>
+                    <span className="text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg">
+                      {equiposIncompletos.length} Incompletos / Sin Pago
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {equiposCategoria.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">No hay equipos registrados en esta categoría.</p>
+                  ) : (
+                    equiposCategoria.map((eq) => {
+                      const apto = esEquipoAptoParaLlaves(eq, jugadores);
+                      const integrantes = jugadores.filter((j) => j.equipoId === eq.id);
+                      const cantHabilitados = integrantes.filter(esJugadorHabilitado).length;
+                      const estadoPago = (eq.estado || "Pendiente").toLowerCase();
+                      const pagoOk =
+                        eq.pagoConfirmado === true ||
+                        estadoPago === "confirmado" ||
+                        estadoPago === "pagado" ||
+                        estadoPago === "aprobado";
+
+                      return (
+                        <div
+                          key={eq.id}
+                          className={`text-xs px-3 py-1.5 rounded-2xl border flex items-center gap-1.5 font-medium ${
+                            apto
+                              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                              : "bg-amber-50 border-amber-200 text-amber-900"
+                          }`}
+                        >
+                          <span>{apto ? "✅" : "⚠️"}</span>
+                          <strong className="font-bold">{eq.nombre}</strong>
+                          <span className="text-[10px] opacity-80">
+                            {apto
+                              ? `(${cantHabilitados}/${CONFIG_TORNEO.plantilla.min} carnets • Pago OK)`
+                              : !pagoOk
+                              ? `(Pago Pendiente • ${cantHabilitados}/${CONFIG_TORNEO.plantilla.min} carnets)`
+                              : `(Incompleto: ${cantHabilitados}/${CONFIG_TORNEO.plantilla.min} carnets)`}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Diagrama Interactivo de Llaves */}
           <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm">

@@ -5,7 +5,9 @@ import {
   agregarJugadorConCodigo,
   expulsarJugador,
   actualizarDocumentoJugador,
-  comprimirDocumento
+  comprimirDocumento,
+  esJugadorHabilitado,
+  obtenerResumenPublico
 } from "../../lib/dbService";
 import { CONFIG_TORNEO, esDocenteAutorizado } from "../../lib/torneoConfig";
 import { obtenerSesionActual } from "../../lib/authService";
@@ -44,9 +46,16 @@ export default function VerEquipo() {
 
   // Modal visor de imagen
   const [visorModal, setVisorModal] = useState(null);
+  const [whatsappCapitanesUrl, setWhatsappCapitanesUrl] = useState(CONFIG_TORNEO.whatsappCapitanesUrl);
 
   useEffect(() => {
     setSesion(obtenerSesionActual());
+    obtenerResumenPublico().then(res => {
+      if (res?.whatsappCapitanesUrl) {
+        setWhatsappCapitanesUrl(res.whatsappCapitanesUrl);
+      }
+    }).catch(() => {});
+
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const codUrl = params.get("codigo");
@@ -163,6 +172,7 @@ export default function VerEquipo() {
 
   const colorHex = CONFIG_TORNEO.coloresUniforme.find(c => c.nombre.toLowerCase() === (equipo?.color || "").toLowerCase())?.hex || "#2563eb";
   const esCapitanOAdmin = sesion && (sesion.rol === "admin" || (equipo?.capitan?.correo && sesion.correo?.toLowerCase() === equipo.capitan.correo?.toLowerCase()));
+  const jugadoresConCarnet = jugadores.filter(esJugadorHabilitado);
 
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 pb-20">
@@ -378,12 +388,22 @@ export default function VerEquipo() {
 
           {/* Banner de Recomendación al Capitán */}
           {esCapitanOAdmin && (
-            <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-950 flex items-start gap-2.5 shadow-sm">
-              <span className="text-xl">💡</span>
-              <div>
-                <strong>Consejo para el Capitán:</strong> Puedes compartir el código{" "}
-                <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border text-blue-900">{codigo}</span> con tus compañeros para que se sumen solos y suban su carnet desde su teléfono, o puedes usar el botón azul de cada fila para subir el carnet tú mismo.
+            <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-start gap-2.5">
+                <span className="text-xl flex-shrink-0">💡</span>
+                <div>
+                  <strong>Consejo para el Capitán:</strong> Puedes compartir el código{" "}
+                  <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border text-blue-900">{codigo}</span> con tus compañeros para que se sumen solos y suban su carnet desde su teléfono, o puedes usar el botón azul de cada fila para subir el carnet tú mismo.
+                </div>
               </div>
+              <a
+                href={whatsappCapitanesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition whitespace-nowrap self-start sm:self-auto"
+              >
+                <span>💬</span> Grupo de Capitanes WhatsApp
+              </a>
             </div>
           )}
 
@@ -473,24 +493,24 @@ export default function VerEquipo() {
             </div>
           )}
 
-          {/* Estado de la Plantilla (Mínimo 8 reglamentario) */}
-          {jugadores.length < CONFIG_TORNEO.plantilla.min ? (
+          {/* Estado de la Plantilla (Mínimo 8 reglamentario con carnet) */}
+          {jugadoresConCarnet.length < CONFIG_TORNEO.plantilla.min ? (
             <div className="bg-amber-50 border border-amber-300 p-4 rounded-xl text-xs text-amber-900 shadow-sm">
               <div className="flex flex-wrap justify-between items-center gap-1 mb-1.5">
                 <strong className="text-sm font-bold flex items-center gap-1.5">
-                  <span>⚠️</span> Plantilla en Construcción ({jugadores.length} / {CONFIG_TORNEO.plantilla.min} mínimos)
+                  <span>⚠️</span> Plantilla en Construcción ({jugadoresConCarnet.length} / {CONFIG_TORNEO.plantilla.min} jugadores con carnet verificados)
                 </strong>
                 <span className="bg-amber-200 text-amber-950 font-bold px-2 py-0.5 rounded text-[10px]">
-                  Faltan {CONFIG_TORNEO.plantilla.min - jugadores.length} para completar
+                  Faltan {CONFIG_TORNEO.plantilla.min - jugadoresConCarnet.length} para completar
                 </span>
               </div>
               <p className="text-[11px] text-amber-800">
-                El reglamento exige al menos 8 jugadores en cancha (7 de campo + 1 arquero).
+                ⚠️ Plantilla en Construcción ({jugadoresConCarnet.length} / 8 jugadores con carnet verificados). Faltan {8 - jugadoresConCarnet.length} para completar el mínimo reglamentario de 8 jugadores para ser elegibles a las llaves del torneo.
               </p>
               <div className="w-full bg-amber-200/70 h-2 rounded-full overflow-hidden mt-2.5">
                 <div
                   className="bg-amber-600 h-full rounded-full transition-all duration-300"
-                  style={{ width: `${Math.min(100, (jugadores.length / CONFIG_TORNEO.plantilla.min) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (jugadoresConCarnet.length / CONFIG_TORNEO.plantilla.min) * 100)}%` }}
                 />
               </div>
             </div>
@@ -498,14 +518,14 @@ export default function VerEquipo() {
             <div className="bg-emerald-50 border border-emerald-300 p-4 rounded-xl text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-2 shadow-sm">
               <div>
                 <strong className="text-sm font-bold flex items-center gap-1.5">
-                  <span>✅</span> Plantilla Reglamentaria Completa ({jugadores.length} / {CONFIG_TORNEO.plantilla.max})
+                  <span>✅</span> Plantilla Completa ({jugadoresConCarnet.length} jugadores con carnet verificados — Equipo Apto para Sorteo de Llaves)
                 </strong>
                 <p className="text-[11px] text-emerald-800 mt-0.5">
-                  Cumple con el mínimo de 8 jugadores y está listo para la programación de partidos.
+                  Cumple con el mínimo reglamentario de 8 jugadores con carnet verificado y el equipo es elegible para el sorteo de llaves.
                 </p>
               </div>
               <span className="bg-emerald-200 text-emerald-900 font-extrabold px-2.5 py-1 rounded text-xs">
-                Apto para Torneo
+                Apto para Sorteo de Llaves
               </span>
             </div>
           )}
@@ -535,7 +555,10 @@ export default function VerEquipo() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {jugadores.map((j, i) => {
-                    const tieneCarnet = Boolean(j.fotoDocumento);
+                    const habilitado = esJugadorHabilitado(j);
+                    const tieneCarnet = Boolean(j.fotoDocumento || j.foto_documento);
+                    const esDocente = esDocenteAutorizado(j.correo);
+
                     return (
                       <tr key={i} className={`hover:bg-gray-50 ${j.esCapitan ? "bg-blue-50/40 font-semibold" : ""}`}>
                         <td className="p-3 text-gray-400 font-mono text-xs">{i + 1}</td>
@@ -556,21 +579,25 @@ export default function VerEquipo() {
                                 type="button"
                                 onClick={() => setVisorModal({
                                   titulo: `Carnet de ${j.nombre} (${j.cuenta})`,
-                                  url: j.fotoDocumento
+                                  url: j.fotoDocumento || j.foto_documento
                                 })}
-                                className="bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1"
+                                className="bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 shadow-sm"
                               >
                                 <span>🪪</span>
                                 <span>Ver Carnet</span>
                               </button>
+                            ) : esDocente ? (
+                              <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-semibold">
+                                👨‍🏫 Docente Exento
+                              </span>
                             ) : (
                               <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
-                                ⚠️ Pendiente
+                                ⚠️ Pendiente (Sin carnet - no suma al cupo)
                               </span>
                             )}
 
                             {/* Botón para que Capitán o Admin suba el carnet si falta o desea cambiarlo */}
-                            {esCapitanOAdmin && (
+                            {esCapitanOAdmin && !esDocente && (
                               <button
                                 type="button"
                                 onClick={() => abrirModalCarnet(j)}

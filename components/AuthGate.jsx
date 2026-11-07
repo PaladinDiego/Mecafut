@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { obtenerSesionActual, solicitarOtp, verificarOtp } from "../lib/authService";
+import { obtenerSesionActual, solicitarOtp, crearCuentaConOtp, iniciarSesionConPassword } from "../lib/authService";
 import { obtenerPerfilPendienteJugador, actualizarDocumentoJugador, comprimirDocumento } from "../lib/dbService";
 
 export default function AuthGate({ children }) {
@@ -9,6 +9,8 @@ export default function AuthGate({ children }) {
 
   // Estados del Formulario de Inicio de Sesión Obligatorio
   const [paso, setPaso] = useState(1);
+  const [modoAcceso, setModoAcceso] = useState("login"); // "login" | "crear"
+  const [password, setPassword] = useState("");
   const [correo, setCorreo] = useState("");
   const [codigo, setCodigo] = useState("");
   const [otpInfo, setOtpInfo] = useState(null);
@@ -71,17 +73,43 @@ export default function AuthGate({ children }) {
     }
   };
 
-  const handleVerificarCodigo = (e) => {
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setErrorLogin("");
+    setLoadingLogin(true);
+    try {
+      const { sesion: nuevaSesion } = await iniciarSesionConPassword(correo, password);
+      setSesion(nuevaSesion);
+      setCorreo("");
+      setPassword("");
+    } catch (err) {
+      setErrorLogin(err.message || "No se pudo iniciar sesión");
+    } finally {
+      setLoadingLogin(false);
+    }
+  };
+
+  const cambiarModoAcceso = (modo) => {
+    setModoAcceso(modo);
+    setPaso(1);
+    setCodigo("");
+    setPassword("");
+    setErrorLogin("");
+    setOtpInfo(null);
+  };
+
+  const handleVerificarCodigo = async (e) => {
     e.preventDefault();
     setErrorLogin("");
     setLoadingLogin(true);
 
     try {
-      const nuevaSesion = verificarOtp(correo, codigo);
+      const nuevaSesion = await crearCuentaConOtp(correo, codigo, password);
       setSesion(nuevaSesion);
       setPaso(1);
       setCorreo("");
       setCodigo("");
+      setPassword("");
       setOtpInfo(null);
     } catch (err) {
       setErrorLogin(err.message || "Código incorrecto o expirado");
@@ -139,9 +167,26 @@ export default function AuthGate({ children }) {
             🔐
           </div>
           <h2 className="text-2xl font-black text-blue-950 tracking-tight">Acceso Institucional</h2>
-          <p className="text-xs text-gray-600 mt-1 mb-6">
-            Es obligatorio iniciar sesión con tu correo oficial <strong>@unitec.edu</strong> para utilizar la plataforma oficial de MECAFUT 2026.
+          <p className="text-xs text-gray-600 mt-1 mb-4">
+            Ingresa con tu correo oficial <strong>@unitec.edu</strong> y tu contraseña. El código por correo solo se pide al crear tu cuenta.
           </p>
+
+          <div className="grid grid-cols-2 gap-1 bg-gray-100 p-1 rounded-xl mb-5 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => cambiarModoAcceso("login")}
+              className={`py-2 rounded-lg transition ${modoAcceso === "login" ? "bg-blue-950 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
+            >
+              Iniciar sesión
+            </button>
+            <button
+              type="button"
+              onClick={() => cambiarModoAcceso("crear")}
+              className={`py-2 rounded-lg transition ${modoAcceso === "crear" ? "bg-blue-950 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
+            >
+              Crear cuenta / Olvidé mi contraseña
+            </button>
+          </div>
 
           {errorLogin && (
             <div className="p-3 mb-4 bg-red-50 border border-red-300 text-red-800 text-xs rounded-xl font-medium text-center">
@@ -149,7 +194,48 @@ export default function AuthGate({ children }) {
             </div>
           )}
 
-          {paso === 1 ? (
+          {modoAcceso === "login" ? (
+            <form onSubmit={handleLogin} className="space-y-4 text-left">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Correo Institucional (@unitec.edu) *
+                </label>
+                <input
+                  type="email"
+                  required
+                  autoComplete="username"
+                  placeholder="ej. diego.ramos@unitec.edu"
+                  value={correo}
+                  onChange={(e) => setCorreo(e.target.value)}
+                  className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Contraseña *
+                </label>
+                <input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  placeholder="Tu contraseña"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loadingLogin}
+                className="w-full bg-blue-950 hover:bg-blue-900 text-white font-bold py-3.5 rounded-xl text-sm transition shadow-md disabled:opacity-50"
+              >
+                {loadingLogin ? "Ingresando..." : "Ingresar →"}
+              </button>
+              <p className="text-[11px] text-gray-500 text-center">
+                ¿Primera vez o no recuerdas tu contraseña? Usa la pestaña <strong>«Crear cuenta»</strong>.
+              </p>
+            </form>
+          ) : paso === 1 ? (
             <form onSubmit={handleSolicitarCodigo} className="space-y-4 text-left">
               <div>
                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
@@ -265,6 +351,22 @@ export default function AuthGate({ children }) {
                     Si no lo ves en tu bandeja principal de Outlook, revisa en tu pestaña <strong>"Otros"</strong> o en la carpeta de <strong>"Correo no deseado / Spam"</strong>.
                   </span>
                 </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  Nueva contraseña (mín. 6 caracteres) *
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  placeholder="Define tu contraseña"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none"
+                />
               </div>
 
               <div className="flex gap-2">

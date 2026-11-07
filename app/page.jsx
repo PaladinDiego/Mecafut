@@ -9,7 +9,7 @@ import {
   isFirebaseConfigured
 } from "../lib/dbService";
 import { CONFIG_TORNEO, esDocenteAutorizado } from "../lib/torneoConfig";
-import { obtenerSesionActual } from "../lib/authService";
+import { obtenerSesionActual, obtenerPerfil, guardarPerfil } from "../lib/authService";
 import Link from "next/link";
 
 export default function Registro() {
@@ -94,6 +94,24 @@ export default function Registro() {
       } else if (s.rol === "estudiante") {
         setEquipo(prev => ({ ...prev, tipoEquipo: "Estudiantes" }));
       }
+      // Autocompletar con el perfil guardado en la cuenta (solo campos vacíos)
+      if (s.correo) {
+        obtenerPerfil(s.correo).then(p => {
+          if (!p) return;
+          const rellenar = prev => ({
+            ...prev,
+            nombre: prev.nombre || p.nombre || "",
+            cuenta: prev.cuenta || p.cuenta || "",
+            dni: prev.dni || p.dni || "",
+            carrera: p.carrera || prev.carrera,
+            fotoDocumento: prev.fotoDocumento || p.foto_documento || null,
+            fotoDocumentoPreview: prev.fotoDocumentoPreview || p.foto_documento || null,
+            tipoDocumento: p.tipo_documento || prev.tipoDocumento
+          });
+          setCapitan(prev => ({ ...rellenar(prev), telefono: prev.telefono || p.telefono || "" }));
+          setJugadorSelf(rellenar);
+        });
+      }
     }
   };
 
@@ -117,30 +135,41 @@ export default function Registro() {
     }
   };
 
-  const handleJugadorChange = (index, field, value) => {
-    const nuevos = [...jugadores];
-    nuevos[index] = { ...nuevos[index], [field]: value };
-    setJugadores(nuevos);
+  const handleJugadorChange = (index, fieldOrUpdates, value) => {
+    setJugadores(prev => {
+      const nuevos = [...prev];
+      if (!nuevos[index]) return prev;
+      if (typeof fieldOrUpdates === "object" && fieldOrUpdates !== null) {
+        nuevos[index] = { ...nuevos[index], ...fieldOrUpdates };
+      } else {
+        nuevos[index] = { ...nuevos[index], [fieldOrUpdates]: value };
+      }
+      return nuevos;
+    });
   };
 
   const agregarJugador = () => {
-    if (jugadores.length + 1 < CONFIG_TORNEO.plantilla.max) {
-      setJugadores([...jugadores, {
-        nombre: "",
-        cuenta: "",
-        correo: "",
-        dni: "",
-        tipoDocumento: "carnet",
-        fotoDocumento: null,
-        fotoDocumentoPreview: null,
-        carrera: CONFIG_TORNEO.carreras[0],
-        codigoClase: ""
-      }]);
-    }
+    setJugadores(prev => {
+      if (prev.length + 1 >= CONFIG_TORNEO.plantilla.max) return prev;
+      return [
+        ...prev,
+        {
+          nombre: "",
+          cuenta: "",
+          correo: "",
+          dni: "",
+          tipoDocumento: "carnet",
+          fotoDocumento: null,
+          fotoDocumentoPreview: null,
+          carrera: CONFIG_TORNEO.carreras[0],
+          codigoClase: ""
+        }
+      ];
+    });
   };
 
   const eliminarJugador = (index) => {
-    setJugadores(jugadores.filter((_, i) => i !== index));
+    setJugadores(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleFileChange = (e) => {
@@ -178,6 +207,7 @@ export default function Registro() {
 
       setResultado(res);
       setMensaje("¡Inscripción registrada con éxito!");
+      guardarPerfil(obtenerSesionActual()?.correo, capitan);
       window.scrollTo({ top: 0, behavior: "smooth" });
       cargarResumen();
     } catch (error) {
@@ -203,6 +233,7 @@ export default function Registro() {
       const res = await agregarJugadorConCodigo(codigoEquipoElegido, jugadorSelf, { esAutoRegistro: true });
       setResultadoJugador(res);
       setMensajeJugador("¡Te has unido exitosamente al equipo!");
+      guardarPerfil(obtenerSesionActual()?.correo, jugadorSelf);
       window.scrollTo({ top: 0, behavior: "smooth" });
       cargarResumen();
     } catch (error) {
@@ -224,7 +255,7 @@ export default function Registro() {
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
           <span>
-            <strong>Entorno:</strong> {isFirebaseConfigured ? "Google Cloud Firestore" : "Modo Simulado Local (Almacenamiento Seguro en Navegador)"}
+            <strong>Servidor Oficial en Línea</strong> — Torneo {CONFIG_TORNEO.periodo}
           </span>
         </div>
         <span className="bg-blue-100 text-blue-900 font-semibold px-2.5 py-0.5 rounded text-xs">
@@ -620,7 +651,7 @@ export default function Registro() {
 
               <div className="text-center pt-2 border-t border-emerald-200/60">
                 <a
-                  href={CONFIG_TORNEO.whatsappCapitanesUrl}
+                  href={resumen?.whatsappCapitanesUrl || CONFIG_TORNEO.whatsappCapitanesUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-5 py-2.5 rounded-xl shadow transition"
@@ -1085,8 +1116,10 @@ export default function Registro() {
                             const file = e.target.files?.[0];
                             if (file) {
                               const dataUrl = await comprimirDocumento(file);
-                              handleJugadorChange(i, "fotoDocumento", dataUrl);
-                              handleJugadorChange(i, "fotoDocumentoPreview", dataUrl);
+                              handleJugadorChange(i, {
+                                fotoDocumento: dataUrl,
+                                fotoDocumentoPreview: dataUrl
+                              });
                             }
                           }}
                           className="text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:bg-blue-900 file:text-white"

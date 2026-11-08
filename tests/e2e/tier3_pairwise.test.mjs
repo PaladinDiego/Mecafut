@@ -29,14 +29,17 @@ import {
 } from '../../lib/bracketUtils.js';
 
 import * as dbService from '../../lib/dbService.js';
+import { verificarOtp } from '../../lib/authService.js';
 
 const {
   validarCorreoInstitucional,
   esJugadorHabilitado,
+  esEquipoAptoParaLlaves,
   obtenerResumenPublico,
   inscribirEquipo,
   obtenerDatosAdmin,
   actualizarDocumentoJugador,
+  verificarCarnetsEquipoAdmin,
   reiniciarBaseDeDatosSimulada,
   guardarConfiguracionGeneral,
   actualizarEnlaceWhatsapp,
@@ -44,6 +47,8 @@ const {
   guardarBracketCategoria,
   guardarTorneoCompleto
 } = dbService;
+
+const VALID_CARNET_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD==";
 
 import { exportarExcelOficial } from '../../lib/exportUtils.js';
 
@@ -93,17 +98,6 @@ function crearEquipoBase(overrides = {}) {
   };
 }
 
-// Filtro de elegibilidad para llaves
-function esEquipoAptoParaLlaves(equipo, todosJugadores) {
-  const estadoPago = (equipo.estado || "Pendiente").toLowerCase();
-  const pagoAprobado = estadoPago === "confirmado" || estadoPago === "pagado" || estadoPago === "aprobado";
-  if (!pagoAprobado) return false;
-
-  const integrantes = todosJugadores.filter(j => j.equipoId === equipo.id);
-  const habilitados = integrantes.filter(esJugadorHabilitado).length;
-  return habilitados >= CONFIG_TORNEO.plantilla.min;
-}
-
 describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
 
   beforeEach(() => {
@@ -141,9 +135,11 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
   });
 
   // P2: F1 (Teléfono Capitán DB) × F8 (Portal del Equipo)
-  it('P2: F1 × F8 — Teléfono del capitán y regla de 8 carnets coexisten en el perfil de equipo', async () => {
+  it('P2: F1 × F8 — Teléfono del capitán y regla de 8 carnets verificados coexisten en el perfil de equipo', async () => {
     const datos = crearEquipoBase({ capitan: { telefono: "+504 8888-9999" } });
     const reg = await inscribirEquipo(datos);
+    verificarOtp("carlos.rubi@unitec.edu", "123456");
+    await verificarCarnetsEquipoAdmin(reg.equipoId);
     const admin = await obtenerDatosAdmin();
     const equipo = admin.equipos.find(e => e.codigoAcceso === reg.codigoAcceso);
     const jugadores = admin.jugadores.filter(j => j.equipoId === equipo.id);
@@ -175,9 +171,9 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
   });
 
   // P5: F4 (Helpers Elegibilidad) × F8 (Regla 8 Carnets en Equipo)
-  it('P5: F4 × F8 — Plantilla de 8 con 7 carnets y 1 pendiente es evaluada como no-apta', () => {
+  it('P5: F4 × F8 — Plantilla de 8 con 7 carnets verificados y 1 pendiente es evaluada como no-apta', () => {
     const jugadores = [
-      ...Array.from({ length: 7 }, (_, i) => ({ id: `j${i}`, fotoDocumento: "carnet" })),
+      ...Array.from({ length: 7 }, (_, i) => ({ id: `j${i}`, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" })),
       { id: "j7", fotoDocumento: null }
     ];
     const habilitados = jugadores.filter(esJugadorHabilitado);
@@ -197,11 +193,12 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
       }]
     });
     await inscribirEquipo(datos);
+    verificarOtp("carlos.rubi@unitec.edu", "123456");
     let admin = await obtenerDatosAdmin();
     let j = admin.jugadores.find(x => x.cuenta === "22019911");
     expect(esJugadorHabilitado(j)).toBe(false);
 
-    await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,subidaAdmin" });
+    await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,subidaAdminValida123" });
     admin = await obtenerDatosAdmin();
     j = admin.jugadores.find(x => x.id === j.id);
     expect(esJugadorHabilitado(j)).toBe(true);
@@ -209,7 +206,7 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
   });
 
   // P7: F4 (Helpers Elegibilidad) × F11 (Filtro Elegibilidad Llaves)
-  it('P7: F4 × F11 — Subir el carnet faltante habilita al equipo en el filtro de llaves de admin', async () => {
+  it('P7: F4 × F11 — Subir el carnet faltante desde admin habilita al equipo en el filtro de llaves', async () => {
     const datos = crearEquipoBase({
       equipo: { estado: "Confirmado" },
       jugadores: [
@@ -218,7 +215,7 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
           cuenta: `220099${i}`,
           correo: `j${i}@unitec.edu`,
           dni: `0501-1999-${i}`,
-          fotoDocumento: "carnet"
+          fotoDocumento: VALID_CARNET_URL
         })),
         {
           nombre: "Pendiente 8vo",
@@ -230,15 +227,17 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
       ]
     });
     const reg = await inscribirEquipo(datos);
+    verificarOtp("carlos.rubi@unitec.edu", "123456");
+    await verificarCarnetsEquipoAdmin(reg.equipoId);
     let admin = await obtenerDatosAdmin();
     let eq = admin.equipos.find(e => e.codigoAcceso === reg.codigoAcceso);
     eq.estado = "Confirmado"; // pago validado
 
     expect(esEquipoAptoParaLlaves(eq, admin.jugadores)).toBe(false);
 
-    // Subir el carnet faltante
+    // Subir el carnet faltante desde admin
     const jFaltante = admin.jugadores.find(j => j.cuenta === "2200997");
-    await actualizarDocumentoJugador({ jugadorId: jFaltante.id, fotoDocumento: "carnetSubido" });
+    await actualizarDocumentoJugador({ jugadorId: jFaltante.id, fotoDocumento: VALID_CARNET_URL });
 
     admin = await obtenerDatosAdmin();
     expect(esEquipoAptoParaLlaves(eq, admin.jugadores)).toBe(true);
@@ -259,23 +258,23 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
   });
 
   // P9: F7 (Atomic Photo Upload) × F4 (Eligibility Helper)
-  it('P9: F7 × F4 — Actualización atómica de foto de un jugador actualiza únicamente su elegibilidad', () => {
+  it('P9: F7 × F4 — Actualización atómica y verificación de foto de un jugador actualiza únicamente su elegibilidad', () => {
     let plantilla = [
       { id: "j1", nombre: "J1", correo: "j1@unitec.edu", fotoDocumento: null },
       { id: "j2", nombre: "David Díaz", correo: "ddiaz@unitec.edu", fotoDocumento: null }
     ];
 
     // Aplicar actualización atómica a David Díaz
-    plantilla = plantilla.map(j => j.id === "j2" ? { ...j, fotoDocumento: "carnetDavid" } : j);
+    plantilla = plantilla.map(j => j.id === "j2" ? { ...j, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" } : j);
 
     expect(esJugadorHabilitado(plantilla[0])).toBe(false);
     expect(esJugadorHabilitado(plantilla[1])).toBe(true);
   });
 
   // P10: F8 (Regla 8 Carnets) × F11 (Filtro Elegibilidad Llaves)
-  it('P10: F8 × F11 — Equipo con 8 carnets pero estado de pago Pendiente no pasa el filtro de llaves', () => {
+  it('P10: F8 × F11 — Equipo con 8 carnets verificados pero estado de pago Pendiente no pasa el filtro de llaves', () => {
     const eq = { id: "e1", estado: "Pendiente" };
-    const jug = Array.from({ length: 8 }, (_, i) => ({ id: `j${i}`, equipoId: "e1", fotoDocumento: "carnet" }));
+    const jug = Array.from({ length: 8 }, (_, i) => ({ id: `j${i}`, equipoId: "e1", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }));
 
     // Cumple con la regla de 8 carnets pero no con el pago
     expect(jug.filter(esJugadorHabilitado).length >= 8).toBe(true);
@@ -295,7 +294,8 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
         todosJugadores.push({
           id: `j_${eq.id}_${j}`,
           equipoId: eq.id,
-          fotoDocumento: eq.estado === "Confirmado" ? "carnet" : null
+          fotoDocumento: eq.estado === "Confirmado" ? VALID_CARNET_URL : null,
+          estadoCarnet: eq.estado === "Confirmado" ? "verificado" : "pendiente"
         });
       }
     });
@@ -319,10 +319,11 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
       }]
     });
     await inscribirEquipo(datos);
+    verificarOtp("carlos.rubi@unitec.edu", "123456");
     let admin = await obtenerDatosAdmin();
     const j = admin.jugadores.find(x => x.cuenta === "22019955");
 
-    await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "carnet_verificado", tipoDocumento: "carnet" });
+    await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: VALID_CARNET_URL, tipoDocumento: "carnet" });
     admin = await obtenerDatosAdmin();
 
     exportarExcelOficial(admin.equipos, admin.jugadores);
@@ -348,14 +349,15 @@ describe('Tier 3: Cross-Feature Interactions (Pairwise Combinations)', () => {
   });
 
   // P14: F4 (Helpers Elegibilidad con Docente) × F11 (Filtro Elegibilidad Llaves)
-  it('P14: F4 × F11 — Equipo con 7 estudiantes con carnet y 1 docente oficial pasa el filtro de llaves', () => {
+  it('P14: F4 × F11 — Equipo con 7 estudiantes con carnet verificado y 1 docente oficial pasa el filtro de llaves', () => {
     const eq = { id: "eqDoc", nombre: "Docente Unido", estado: "Confirmado" };
     const jug = [
       ...Array.from({ length: 7 }, (_, i) => ({
         id: `est_${i}`,
         equipoId: "eqDoc",
         correo: `est${i}@unitec.edu`,
-        fotoDocumento: "carnet"
+        fotoDocumento: VALID_CARNET_URL,
+        estadoCarnet: "verificado"
       })),
       {
         id: "doc1",

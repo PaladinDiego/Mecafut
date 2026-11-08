@@ -1,7 +1,14 @@
 "use client";
 
 export default function BracketTorneo({ bracketData, editableAdmin = false, onRegistrarGol, onCambiarGanador }) {
-  if (!bracketData || (!bracketData.rondas && !bracketData.jornadas && bracketData.tipo !== "triangular_final")) {
+  if (
+    !bracketData ||
+    (!bracketData.rondas &&
+      !bracketData.jornadas &&
+      !bracketData.partidos &&
+      bracketData.tipo !== "triangular_final" &&
+      bracketData.tipo !== "serie_dos_equipos")
+  ) {
     return (
       <div className="bg-white p-8 rounded-2xl border text-center text-gray-400 text-xs sm:text-sm">
         Aún no se han generado los cruces para esta categoría.
@@ -9,7 +16,82 @@ export default function BracketTorneo({ bracketData, editableAdmin = false, onRe
     );
   }
 
-  // 1. FORMATO ESPECIAL FEMENINO: TRIANGULAR + FINAL
+  // 1. FORMATO ESPECIAL FEMENINO: SERIE DE 2 EQUIPOS
+  if (bracketData.tipo === "serie_dos_equipos") {
+    const { reglamentoEspecial, formato, partidos, campeon, globalA, globalB, equiposBase } = bracketData;
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-purple-50 border-2 border-purple-200 p-4 rounded-2xl flex items-start gap-3">
+          <span className="text-2xl">📋</span>
+          <div>
+            <h4 className="text-sm font-black text-purple-950 uppercase tracking-wider">
+              {formato === "ida_vuelta"
+                ? "Serie Final Femenina (Ida y Vuelta — 2 Equipos)"
+                : formato === "mejor_de_tres"
+                ? "Serie Final Femenina (Mejor de 3 — 2 Equipos)"
+                : "Gran Final Femenina (Partido Único — 2 Equipos)"}
+            </h4>
+            <p className="text-xs text-purple-900 mt-0.5 leading-relaxed">
+              {reglamentoEspecial}
+            </p>
+          </div>
+        </div>
+
+        {campeon && (
+          <div className="bg-gradient-to-r from-amber-100 via-yellow-100 to-amber-200 border-2 border-amber-400 p-5 rounded-2xl text-center shadow-md animate-fade-in">
+            <span className="text-3xl block">🏆</span>
+            <span className="text-xs uppercase font-extrabold text-amber-900 tracking-widest block mt-1">
+              ¡Campeonas MECAFUT 2026!
+            </span>
+            <h3 className="text-2xl font-black text-blue-950">{campeon.nombre}</h3>
+          </div>
+        )}
+
+        {formato === "ida_vuelta" && equiposBase && (
+          <div className="bg-white p-4 rounded-2xl border text-center shadow-sm">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+              Marcador Global Acumulado
+            </span>
+            <div className="flex items-center justify-center gap-6 text-lg sm:text-2xl font-black text-blue-950 font-mono">
+              <span>{equiposBase[0]?.nombre || "Equipo 1"}: {globalA || 0}</span>
+              <span className="text-gray-400">-</span>
+              <span>{equiposBase[1]?.nombre || "Equipo 2"}: {globalB || 0}</span>
+            </div>
+          </div>
+        )}
+
+        {formato === "mejor_de_tres" && equiposBase && (
+          <div className="bg-white p-4 rounded-2xl border text-center shadow-sm">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+              Serie al Mejor de 3 (Victorias)
+            </span>
+            <div className="flex items-center justify-center gap-6 text-lg sm:text-2xl font-black text-blue-950 font-mono">
+              <span>{equiposBase[0]?.nombre || "Equipo 1"}: {bracketData.victoriasA || 0}</span>
+              <span className="text-gray-400">-</span>
+              <span>{equiposBase[1]?.nombre || "Equipo 2"}: {bracketData.victoriasB || 0}</span>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">Primer equipo en ganar 2 partidos se corona Campeón Oficial.</p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+          {(partidos || []).map((partido, i) => (
+            <TarjetaPartido
+              key={partido?.id || i}
+              partido={partido}
+              esFinal={formato === "final_unica"}
+              editableAdmin={editableAdmin}
+              onRegistrarGol={onRegistrarGol}
+              onCambiarGanador={onCambiarGanador}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // 2. FORMATO ESPECIAL FEMENINO: TRIANGULAR + FINAL
   if (bracketData.tipo === "triangular_final") {
     const { reglamentoEspecial, jornadas, granFinal, tabla, campeon } = bracketData;
 
@@ -40,60 +122,70 @@ export default function BracketTorneo({ bracketData, editableAdmin = false, onRe
         )}
 
         {/* Tabla de Posiciones en Vivo */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5">
-          <h4 className="text-sm font-extrabold text-blue-950 mb-3 flex items-center gap-2">
-            <span>📊</span> Tabla de Posiciones — Triangular Femenino
-          </h4>
+        {tabla && Array.isArray(tabla) && tabla.length > 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5">
+            <h4 className="text-sm font-extrabold text-blue-950 mb-3 flex items-center gap-2">
+              <span>📊</span> Tabla de Posiciones — Triangular Femenino
+            </h4>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs sm:text-sm text-left border-collapse">
-              <thead>
-                <tr className="bg-blue-950 text-white uppercase text-[10px] tracking-wider">
-                  <th className="p-2.5">Pos</th>
-                  <th className="p-2.5">Equipo</th>
-                  <th className="p-2.5 text-center">PJ</th>
-                  <th className="p-2.5 text-center">PG</th>
-                  <th className="p-2.5 text-center">PP</th>
-                  <th className="p-2.5 text-center">GF</th>
-                  <th className="p-2.5 text-center">GC</th>
-                  <th className="p-2.5 text-center">DG</th>
-                  <th className="p-2.5 text-center font-black bg-blue-900">PTS</th>
-                  <th className="p-2.5 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {(tabla || []).map((fila, idx) => {
-                  if (!fila) return null;
-                  return (
-                    <tr key={fila.id || idx} className={`hover:bg-gray-50 ${idx < 2 ? "bg-purple-50/40" : ""}`}>
-                      <td className="p-2.5 font-bold font-mono text-center">{idx + 1}</td>
-                      <td className="p-2.5 font-bold text-gray-900 flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full border" style={{ backgroundColor: fila.color || "#cbd5e1" }} />
-                        <span>{fila.nombre}</span>
-                      </td>
-                      <td className="p-2.5 text-center font-mono">{fila.pj}</td>
-                      <td className="p-2.5 text-center font-mono">{fila.pg}</td>
-                      <td className="p-2.5 text-center font-mono">{fila.pp}</td>
-                      <td className="p-2.5 text-center font-mono">{fila.gf}</td>
-                      <td className="p-2.5 text-center font-mono">{fila.gc}</td>
-                      <td className="p-2.5 text-center font-mono font-semibold">{fila.dg > 0 ? `+${fila.dg}` : fila.dg}</td>
-                      <td className="p-2.5 text-center font-mono font-black text-blue-950 bg-blue-50/80">{fila.pts}</td>
-                      <td className="p-2.5 text-center">
-                        {idx < 2 ? (
-                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                            Zona Final
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-gray-400">Eliminada</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs sm:text-sm text-left border-collapse">
+                <thead>
+                  <tr className="bg-blue-950 text-white uppercase text-[10px] tracking-wider">
+                    <th className="p-2.5">Pos</th>
+                    <th className="p-2.5">Equipo</th>
+                    <th className="p-2.5 text-center">PJ</th>
+                    <th className="p-2.5 text-center">PG</th>
+                    <th className="p-2.5 text-center">PP</th>
+                    <th className="p-2.5 text-center">GF</th>
+                    <th className="p-2.5 text-center">GC</th>
+                    <th className="p-2.5 text-center">DG</th>
+                    <th className="p-2.5 text-center font-black bg-blue-900">PTS</th>
+                    <th className="p-2.5 text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {tabla.map((fila, idx) => {
+                    if (!fila) return null;
+                    return (
+                      <tr key={fila.id || idx} className={`hover:bg-gray-50 ${idx < 2 ? "bg-purple-50/40" : ""}`}>
+                        <td className="p-2.5 font-bold font-mono text-center">{idx + 1}</td>
+                        <td className="p-2.5 font-bold text-gray-900 flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-full border" style={{ backgroundColor: fila.color || "#cbd5e1" }} />
+                          <span>{fila.nombre}</span>
+                        </td>
+                        <td className="p-2.5 text-center font-mono">{fila.pj}</td>
+                        <td className="p-2.5 text-center font-mono">{fila.pg}</td>
+                        <td className="p-2.5 text-center font-mono">{fila.pp}</td>
+                        <td className="p-2.5 text-center font-mono">{fila.gf}</td>
+                        <td className="p-2.5 text-center font-mono">{fila.gc}</td>
+                        <td className="p-2.5 text-center font-mono font-semibold">{fila.dg > 0 ? `+${fila.dg}` : fila.dg}</td>
+                        <td className="p-2.5 text-center font-mono font-black text-blue-950 bg-blue-50/80">{fila.pts}</td>
+                        <td className="p-2.5 text-center">
+                          {idx < 2 ? (
+                            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                              Zona Final
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">Eliminada</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 text-center space-y-1">
+            <span className="text-xl block">📊</span>
+            <h5 className="text-xs font-bold text-gray-700">Tabla de Posiciones Oficial</h5>
+            <p className="text-[11px] text-gray-500">
+              La tabla clasificatoria será publicada por el Comité Organizador al concluir los encuentros de la fase regular.
+            </p>
+          </div>
+        )}
 
         {/* Jornadas del Triangular */}
         <div>

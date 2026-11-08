@@ -307,20 +307,29 @@ test('Student "estudiante@unitec.edu.hn" without photo MUST return false', () =>
   assert.equal(res, false);
 });
 
-test('Student with camelCase fotoDocumento MUST return true', () => {
-  const res = esJugadorHabilitado({
-    nombre: 'Alumno Con Carnet',
+test('Student with camelCase fotoDocumento in en_revision returns false until verified, then true', () => {
+  const enRevision = esJugadorHabilitado({
+    nombre: 'Alumno Con Carnet En Revision',
     correo: 'alumno@unitec.edu',
-    fotoDocumento: 'data:image/jpeg;base64,123456'
+    fotoDocumento: 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+  });
+  assert.equal(enRevision, false);
+
+  const res = esJugadorHabilitado({
+    nombre: 'Alumno Con Carnet Verificado',
+    correo: 'alumno@unitec.edu',
+    fotoDocumento: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    estadoCarnet: 'verificado'
   });
   assert.equal(res, true);
 });
 
-test('Student with snake_case foto_documento MUST return true', () => {
+test('Student with snake_case foto_documento + estado_carnet verificado MUST return true', () => {
   const res = esJugadorHabilitado({
     nombre: 'Alumno Con Carnet DB',
     correo: 'alumno@unitec.edu',
-    foto_documento: 'https://supabase.co/storage/carnet.jpg'
+    foto_documento: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    estado_carnet: 'verificado'
   });
   assert.equal(res, true);
 });
@@ -511,7 +520,7 @@ await asyncTest('Student captain without carnet photo MUST be rejected at inscri
 
   await assert.rejects(
     async () => await inscribirEquipo(payload),
-    /adjuntar obligatoriamente la foto de su carnet/i
+    /adjuntar obligatoriamente la foto.*carnet/i
   );
 });
 

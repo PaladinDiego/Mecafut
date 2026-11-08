@@ -251,15 +251,16 @@ await runAsyncTest('1.3: Prueba de estrés Monte Carlo: 50 mutaciones concurrent
 // ======================================================================
 console.log('\n● Suite 2: Eligibility Helper Integration (7 Students + 1 Teacher Quota Test)');
 
-runTest('2.1: Plantilla con 7 estudiantes con carnet + 1 docente oficial (juan.mejia@unitec.edu.hn) sin carnet cumple cupo de 8', () => {
+runTest('2.1: Plantilla con 7 estudiantes con carnet verificado + 1 docente oficial (juan.mejia@unitec.edu.hn) sin carnet cumple cupo de 8', () => {
+  const validImg = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
   const plantilla = [
-    { nombre: 'Capitán Estudiante', correo: 'capitan@unitec.edu', fotoDocumento: 'data:img1' },
-    { nombre: 'Estudiante 2', correo: 'est2@unitec.edu', fotoDocumento: 'data:img2' },
-    { nombre: 'Estudiante 3', correo: 'est3@unitec.edu', fotoDocumento: 'data:img3' },
-    { nombre: 'Estudiante 4', correo: 'est4@unitec.edu', fotoDocumento: 'data:img4' },
-    { nombre: 'Estudiante 5', correo: 'est5@unitec.edu', fotoDocumento: 'data:img5' },
-    { nombre: 'Estudiante 6', correo: 'est6@unitec.edu', fotoDocumento: 'data:img6' },
-    { nombre: 'Estudiante 7', correo: 'est7@unitec.edu', fotoDocumento: 'data:img7' },
+    { nombre: 'Capitán Estudiante', correo: 'capitan@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 2', correo: 'est2@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 3', correo: 'est3@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 4', correo: 'est4@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 5', correo: 'est5@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 6', correo: 'est6@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 7', correo: 'est7@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
     { nombre: 'Ing. Juan Miguel Mejía', correo: 'juan.mejia@unitec.edu.hn', fotoDocumento: null } // Docente exento de carnet
   ];
 
@@ -276,15 +277,16 @@ runTest('2.1: Plantilla con 7 estudiantes con carnet + 1 docente oficial (juan.m
   assert.strictEqual(bannerAlertaActivo, false, 'No debe mostrar alerta de plantilla incompleta');
 });
 
-runTest('2.2: Plantilla con 7 estudiantes con carnet + 1 docente oficial (cristhyan.rivera@unitec.edu.hn) sin carnet cumple cupo', () => {
+runTest('2.2: Plantilla con 7 estudiantes con carnet verificado + 1 docente oficial (cristhyan.rivera@unitec.edu.hn) sin carnet cumple cupo', () => {
+  const validImg = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
   const plantilla = [
-    { nombre: 'Capitán Estudiante', correo: 'cap@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 2', correo: 'e2@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 3', correo: 'e3@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 4', correo: 'e4@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 5', correo: 'e5@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 6', correo: 'e6@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 7', correo: 'e7@unitec.edu', fotoDocumento: 'data:img' },
+    { nombre: 'Capitán Estudiante', correo: 'cap@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 2', correo: 'e2@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 3', correo: 'e3@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 4', correo: 'e4@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 5', correo: 'e5@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 6', correo: 'e6@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 7', correo: 'e7@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
     { nombre: 'Ing. Cristhyan Rivera', correo: 'cristhyan.rivera@unitec.edu.hn', fotoDocumento: null }
   ];
 
@@ -293,15 +295,16 @@ runTest('2.2: Plantilla con 7 estudiantes con carnet + 1 docente oficial (cristh
   assert.ok(habilitados.length >= CONFIG_TORNEO.plantilla.min);
 });
 
-runTest('2.3: Plantilla con 7 estudiantes con carnet + 1 estudiante normal SIN carnet NO cumple cupo de 8', () => {
+runTest('2.3: Plantilla con 7 estudiantes con carnet verificado + 1 estudiante normal SIN carnet NO cumple cupo de 8', () => {
+  const validImg = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
   const plantilla = [
-    { nombre: 'Capitán Estudiante', correo: 'cap@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 2', correo: 'e2@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 3', correo: 'e3@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 4', correo: 'e4@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 5', correo: 'e5@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 6', correo: 'e6@unitec.edu', fotoDocumento: 'data:img' },
-    { nombre: 'Estudiante 7', correo: 'e7@unitec.edu', fotoDocumento: 'data:img' },
+    { nombre: 'Capitán Estudiante', correo: 'cap@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 2', correo: 'e2@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 3', correo: 'e3@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 4', correo: 'e4@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 5', correo: 'e5@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 6', correo: 'e6@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
+    { nombre: 'Estudiante 7', correo: 'e7@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' },
     { nombre: 'Estudiante 8 Sin Carnet', correo: 'sin_carnet@unitec.edu', fotoDocumento: null }
   ];
 
@@ -311,13 +314,16 @@ runTest('2.3: Plantilla con 7 estudiantes con carnet + 1 estudiante normal SIN c
   assert.strictEqual(cumpleCupo, false, 'El estudiante sin carnet NO debe sumar al cupo de 8');
 });
 
-runTest('2.4: Compatibilidad con snake_case de Supabase (foto_documento) y camelCase (fotoDocumento)', () => {
-  const jugadorCamel = { correo: 'a@unitec.edu', fotoDocumento: 'data:carnet' };
-  const jugadorSnake = { correo: 'b@unitec.edu', foto_documento: 'data:carnet' };
+runTest('2.4: Compatibilidad con snake_case de Supabase (foto_documento/estado_carnet) y camelCase (fotoDocumento/estadoCarnet)', () => {
+  const validImg = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+  const jugadorCamel = { correo: 'a@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'verificado' };
+  const jugadorSnake = { correo: 'b@unitec.edu', foto_documento: validImg, estado_carnet: 'verificado' };
+  const jugadorEnRevision = { correo: 'r@unitec.edu', fotoDocumento: validImg, estadoCarnet: 'en_revision' };
   const jugadorInvalido = { correo: 'c@unitec.edu', fotoDocumento: null, foto_documento: null };
 
   assert.strictEqual(esJugadorHabilitado(jugadorCamel), true);
   assert.strictEqual(esJugadorHabilitado(jugadorSnake), true);
+  assert.strictEqual(esJugadorHabilitado(jugadorEnRevision), false);
   assert.strictEqual(esJugadorHabilitado(jugadorInvalido), false);
 });
 

@@ -359,13 +359,15 @@ describe('DIMENSION 2: Quota Calculation Matrix Stress Test across 1..15 Roster 
               foto_documento: null
             };
 
-            // Distribute carnets
+            // Distribute verified carnets
             if (i < numCarnets) {
               // Alternate between camelCase and snake_case properties
               if (i % 2 === 0) {
-                player.fotoDocumento = `data:image/jpeg;base64,CARNET_${i}`;
+                player.fotoDocumento = `data:image/jpeg;base64,CARNET_VERIF_${i}`;
+                player.estadoCarnet = 'verificado';
               } else {
-                player.foto_documento = `https://supabase.co/storage/carnet_${i}.png`;
+                player.foto_documento = `data:image/png;base64,CARNET_VERIF_${i}`;
+                player.estado_carnet = 'verificado';
               }
             }
 
@@ -439,9 +441,10 @@ describe('DIMENSION 2: Quota Calculation Matrix Stress Test across 1..15 Roster 
     };
     assert.equal(esJugadorHabilitado(pTeacherWithCarnet), true);
     
-    // Roster of 7 students with carnet + 1 teacher with carnet = exactly 8 players
+    // Roster of 7 students with verified carnet + 1 teacher with carnet = exactly 8 players
+    const validCarnet = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
     const roster = [
-      ...Array.from({ length: 7 }, (_, i) => ({ correo: `s${i}@unitec.edu`, fotoDocumento: 'carnet' })),
+      ...Array.from({ length: 7 }, (_, i) => ({ correo: `s${i}@unitec.edu`, fotoDocumento: validCarnet, estadoCarnet: 'verificado' })),
       pTeacherWithCarnet
     ];
     const habilitados = roster.filter(esJugadorHabilitado);
@@ -461,9 +464,10 @@ describe('DIMENSION 2: Quota Calculation Matrix Stress Test across 1..15 Roster 
   });
 
   test('T2.3: Boundary exact thresholds: exactly 7 vs exactly 8 habilitados', () => {
-    // Exactly 7 habilitados (6 students with carnet + 1 teacher exempt, 1 student without carnet = 8 players total)
+    const validCarnet = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    // Exactly 7 habilitados (6 students with verified carnet + 1 teacher exempt, 1 student without carnet = 8 players total)
     const roster7 = [
-      ...Array.from({ length: 6 }, (_, i) => ({ correo: `s${i}@unitec.edu`, fotoDocumento: 'carnet' })),
+      ...Array.from({ length: 6 }, (_, i) => ({ correo: `s${i}@unitec.edu`, fotoDocumento: validCarnet, estadoCarnet: 'verificado' })),
       { correo: TEACHER_JUAN, fotoDocumento: null }, // teacher exempt (habilitado #7)
       { correo: 's7@unitec.edu', fotoDocumento: null } // student pending (not habilitado)
     ];
@@ -473,8 +477,9 @@ describe('DIMENSION 2: Quota Calculation Matrix Stress Test across 1..15 Roster 
     assert.equal(hab7.length >= 8, false, 'Must be evaluated as Plantilla en Construcción (NOT APTO)');
     assert.equal(8 - hab7.length, 1, 'Exactly 1 carnet faltante');
 
-    // Exactly 8 habilitados (same roster, but student #7 uploads carnet)
-    roster7[7].fotoDocumento = 'data:image/png;base64,NEW_CARNET';
+    // Exactly 8 habilitados (same roster, but student #7 uploads carnet and Admin verifies it)
+    roster7[7].fotoDocumento = 'data:image/png;base64,NEW_CARNET_VERIFICADO';
+    roster7[7].estadoCarnet = 'verificado';
     const hab8 = roster7.filter(esJugadorHabilitado);
     assert.equal(hab8.length, 8, 'Exactly 8 habilitados');
     assert.equal(hab8.length >= 8, true, 'Must be evaluated as Plantilla Completa (APTO)');

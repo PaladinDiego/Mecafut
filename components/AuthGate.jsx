@@ -1,7 +1,21 @@
 "use client";
 import { useState, useEffect } from "react";
-import { obtenerSesionActual, solicitarOtp, crearCuentaConOtp, iniciarSesionConPassword } from "../lib/authService";
-import { obtenerPerfilPendienteJugador, actualizarDocumentoJugador, comprimirDocumento } from "../lib/dbService";
+import {
+  obtenerSesionActual,
+  solicitarOtp,
+  crearCuentaConOtp,
+  recuperarPasswordConOtp,
+  cambiarPasswordObligatorio,
+  iniciarSesionConPassword
+} from "../lib/authService";
+import {
+  obtenerPerfilPendienteJugador,
+  actualizarDocumentoJugador,
+  comprimirDocumento,
+  isSupabaseConfigured
+} from "../lib/dbService";
+import { isProductionConfigMissing } from "../lib/supabase";
+import BrandMark from "./BrandMark";
 
 export default function AuthGate({ children }) {
   const [sesion, setSesion] = useState(null);
@@ -9,7 +23,7 @@ export default function AuthGate({ children }) {
 
   // Estados del Formulario de Inicio de Sesión Obligatorio
   const [paso, setPaso] = useState(1);
-  const [modoAcceso, setModoAcceso] = useState("login"); // "login" | "crear"
+  const [modoAcceso, setModoAcceso] = useState("login"); // "login" | "crear" | "recuperar"
   const [password, setPassword] = useState("");
   const [correo, setCorreo] = useState("");
   const [codigo, setCodigo] = useState("");
@@ -17,6 +31,12 @@ export default function AuthGate({ children }) {
   const [loadingLogin, setLoadingLogin] = useState(false);
   const [errorLogin, setErrorLogin] = useState("");
   const [copiado, setCopiado] = useState(false);
+
+  // Estado para cambio de contraseña obligatorio (temporal de admin)
+  const [nuevaPasswordObligatoria, setNuevaPasswordObligatoria] = useState("");
+  const [confirmarPasswordObligatoria, setConfirmarPasswordObligatoria] = useState("");
+  const [loadingCambioObligatorio, setLoadingCambioObligatorio] = useState(false);
+  const [errorCambioObligatorio, setErrorCambioObligatorio] = useState("");
 
   // Estados para Registro Incompleto (Estudiante pre-inscrito por Capitán sin foto)
   const [perfilIncompleto, setPerfilIncompleto] = useState(null);
@@ -104,7 +124,12 @@ export default function AuthGate({ children }) {
     setLoadingLogin(true);
 
     try {
-      const nuevaSesion = await crearCuentaConOtp(correo, codigo, password);
+      let nuevaSesion;
+      if (modoAcceso === "recuperar") {
+        nuevaSesion = await recuperarPasswordConOtp(correo, codigo, password);
+      } else {
+        nuevaSesion = await crearCuentaConOtp(correo, codigo, password);
+      }
       setSesion(nuevaSesion);
       setPaso(1);
       setCorreo("");
@@ -115,6 +140,30 @@ export default function AuthGate({ children }) {
       setErrorLogin(err.message || "Código incorrecto o expirado");
     } finally {
       setLoadingLogin(false);
+    }
+  };
+
+  const handleCambioObligatorio = async (e) => {
+    e.preventDefault();
+    setErrorCambioObligatorio("");
+    if (!nuevaPasswordObligatoria || nuevaPasswordObligatoria.length < 8) {
+      setErrorCambioObligatorio("La nueva contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (nuevaPasswordObligatoria !== confirmarPasswordObligatoria) {
+      setErrorCambioObligatorio("Las contraseñas ingresadas no coinciden.");
+      return;
+    }
+    setLoadingCambioObligatorio(true);
+    try {
+      const sesionActualizada = await cambiarPasswordObligatorio(nuevaPasswordObligatoria);
+      setSesion(sesionActualizada);
+      setNuevaPasswordObligatoria("");
+      setConfirmarPasswordObligatoria("");
+    } catch (err) {
+      setErrorCambioObligatorio(err.message || "No se pudo actualizar la contraseña.");
+    } finally {
+      setLoadingCambioObligatorio(false);
     }
   };
 
@@ -147,9 +196,30 @@ export default function AuthGate({ children }) {
     }
   };
 
+  if (isProductionConfigMissing) {
+    return (
+      <div className="auth-gate-shell min-h-[78vh] flex items-center justify-center p-4">
+        <div className="auth-gate-card bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-xl border-2 border-red-700 text-center animate-fade-in">
+          <div className="w-14 h-14 bg-red-100 text-red-900 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl font-black shadow-inner">
+            🛡️
+          </div>
+          <h2 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
+            Configuración Requerida
+          </h2>
+          <p className="text-xs text-gray-600 mt-2 mb-4 leading-relaxed">
+            Por directiva de seguridad y protección de datos institucionales, la plataforma oficial en producción requiere conexión segura con Supabase. Contacta al Comité Organizador para verificar las credenciales de entorno.
+          </p>
+          <div className="p-3 bg-red-50 border border-red-200 text-red-800 text-[11px] font-mono rounded-xl">
+            Modo seguro activo: fail-closed
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (cargandoSesion) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center p-4">
+      <div className="min-h-[60vh] flex items-center justify-center p-4" role="status" aria-live="polite">
         <div className="text-center space-y-2">
           <div className="w-8 h-8 border-4 border-blue-900 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p className="text-xs text-gray-500 font-semibold">Cargando plataforma MECAFUT...</p>
@@ -158,22 +228,22 @@ export default function AuthGate({ children }) {
     );
   }
 
-  // 1. PANTALLA BLOQUEANTE SI NO HA INICIADO SESIÓN (Requisito 5)
+  // 1. PANTALLA BLOQUEANTE SI NO HA INICIADO SESIÓN
   if (!sesion) {
     return (
-      <div className="min-h-[78vh] flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-xl border-2 border-blue-900 text-center animate-fade-in">
-          <div className="w-14 h-14 bg-blue-100 text-blue-950 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl font-black shadow-inner">
-            🔐
-          </div>
-          <h2 className="text-2xl font-black text-blue-950 tracking-tight">Acceso Institucional</h2>
+      <div className="auth-gate-shell min-h-[78vh] flex items-center justify-center p-4">
+        <div className="auth-gate-card bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-xl border-2 border-blue-900 text-center animate-fade-in">
+          <BrandMark className="mx-auto mb-4" />
+          <p className="page-kicker">MECAFUT · UNITEC</p>
+          <h1 className="text-2xl font-black text-blue-950 tracking-tight">Acceso institucional</h1>
           <p className="text-xs text-gray-600 mt-1 mb-4">
-            Ingresa con tu correo oficial <strong>@unitec.edu</strong> y tu contraseña. El código por correo solo se pide al crear tu cuenta.
+            Ingresa con tu correo oficial <strong>@unitec.edu</strong> y tu contraseña institucional.
           </p>
 
-          <div className="grid grid-cols-2 gap-1 bg-gray-100 p-1 rounded-xl mb-5 text-xs font-bold">
+          <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-xl mb-5 text-xs font-bold">
             <button
               type="button"
+              aria-pressed={modoAcceso === "login"}
               onClick={() => cambiarModoAcceso("login")}
               className={`py-2 rounded-lg transition ${modoAcceso === "login" ? "bg-blue-950 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
             >
@@ -181,15 +251,24 @@ export default function AuthGate({ children }) {
             </button>
             <button
               type="button"
+              aria-pressed={modoAcceso === "crear"}
               onClick={() => cambiarModoAcceso("crear")}
               className={`py-2 rounded-lg transition ${modoAcceso === "crear" ? "bg-blue-950 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
             >
-              Crear cuenta / Olvidé mi contraseña
+              Crear cuenta
+            </button>
+            <button
+              type="button"
+              aria-pressed={modoAcceso === "recuperar"}
+              onClick={() => cambiarModoAcceso("recuperar")}
+              className={`py-2 rounded-lg transition ${modoAcceso === "recuperar" ? "bg-blue-950 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
+            >
+              Recuperar clave
             </button>
           </div>
 
           {errorLogin && (
-            <div className="p-3 mb-4 bg-red-50 border border-red-300 text-red-800 text-xs rounded-xl font-medium text-center">
+            <div className="p-3 mb-4 state-message state-message--error text-xs font-medium text-center" role="alert">
               {errorLogin}
             </div>
           )}
@@ -197,10 +276,11 @@ export default function AuthGate({ children }) {
           {modoAcceso === "login" ? (
             <form onSubmit={handleLogin} className="space-y-4 text-left">
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                <label htmlFor="login-email" className="block text-xs font-bold text-gray-700 uppercase mb-1">
                   Correo Institucional (@unitec.edu) *
                 </label>
                 <input
+                  id="login-email"
                   type="email"
                   required
                   autoComplete="username"
@@ -211,10 +291,11 @@ export default function AuthGate({ children }) {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                <label htmlFor="login-password" className="block text-xs font-bold text-gray-700 uppercase mb-1">
                   Contraseña *
                 </label>
                 <input
+                  id="login-password"
                   type="password"
                   required
                   autoComplete="current-password"
@@ -232,16 +313,17 @@ export default function AuthGate({ children }) {
                 {loadingLogin ? "Ingresando..." : "Ingresar →"}
               </button>
               <p className="text-[11px] text-gray-500 text-center">
-                ¿Primera vez o no recuerdas tu contraseña? Usa la pestaña <strong>«Crear cuenta»</strong>.
+                ¿Primera vez? Usa la pestaña <strong>«Crear cuenta»</strong>. ¿Olvidaste tu contraseña? Usa <strong>«Recuperar clave»</strong>.
               </p>
             </form>
           ) : paso === 1 ? (
             <form onSubmit={handleSolicitarCodigo} className="space-y-4 text-left">
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                <label htmlFor="registration-email" className="block text-xs font-bold text-gray-700 uppercase mb-1">
                   Correo Institucional (@unitec.edu) *
                 </label>
                 <input
+                  id="registration-email"
                   type="email"
                   required
                   placeholder="ej. diego.ramos@unitec.edu"
@@ -250,48 +332,11 @@ export default function AuthGate({ children }) {
                   className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none font-mono"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Admite buzones @unitec.edu y @unitec.edu.hn
+                  {modoAcceso === "recuperar"
+                    ? "Te enviaremos un código para restablecer tu contraseña."
+                    : "Te enviaremos un código para confirmar tu cuenta y crear tu contraseña."}
                 </p>
               </div>
-
-              {/* Accesos rápidos de prueba solo para desarrollo local */}
-              {process.env.NODE_ENV !== "production" && (
-                <div className="bg-blue-50/70 p-3 rounded-xl border border-blue-100 text-left">
-                  <span className="block text-[11px] font-bold text-blue-900 mb-1.5">
-                    💡 Accesos rápidos de prueba (Dev):
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setCorreo("carlos.rubi@unitec.edu")}
-                      className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
-                    >
-                      👑 Admin
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCorreo("juan.mejia@unitec.edu.hn")}
-                      className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
-                    >
-                      👑🎓 Admin Docente
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCorreo("jared.sauceda@unitec.edu")}
-                      className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
-                    >
-                      🎓 Docente
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCorreo("estudiante.demo@unitec.edu")}
-                      className="text-[10px] bg-white border border-blue-300 hover:bg-blue-100 text-blue-950 px-2 py-0.5 rounded font-semibold transition"
-                    >
-                      ⚽ Estudiante Demo
-                    </button>
-                  </div>
-                </div>
-              )}
 
               <button
                 type="submit"
@@ -303,44 +348,24 @@ export default function AuthGate({ children }) {
             </form>
           ) : (
             <form onSubmit={handleVerificarCodigo} className="space-y-4 text-left">
-              <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-center">
+              <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-center" role="status">
                 <span className="text-xs text-emerald-900 font-semibold block">
-                  {otpInfo?.modoEnvio === "email"
+                  {otpInfo?.modoEnvio === "servidor" || otpInfo?.modoEnvio === "email"
                     ? `¡Código enviado a tu buzón institucional ${correo}!`
-                    : `Código OTP generado para ${correo}`}
+                    : `Código OTP enviado a ${correo}`}
                 </span>
-
-                {process.env.NODE_ENV !== "production" && otpInfo?.codigoOtp && (
-                  <div className="mt-2 p-2 bg-white border border-emerald-300 rounded-lg inline-flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Código de prueba (Dev):</span>
-                    <strong className="text-base font-mono tracking-widest text-emerald-950">
-                      {otpInfo.codigoOtp}
-                    </strong>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(otpInfo.codigoOtp);
-                        setCodigo(otpInfo.codigoOtp);
-                        setCopiado(true);
-                        setTimeout(() => setCopiado(false), 2000);
-                      }}
-                      className="text-[10px] bg-emerald-600 text-white font-bold px-2 py-1 rounded hover:bg-emerald-700 transition"
-                    >
-                      {copiado ? "✓ Copiado" : "Copiar"}
-                    </button>
-                  </div>
-                )}
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                <label htmlFor="verification-code" className="block text-xs font-bold text-gray-700 uppercase mb-1">
                   Código de 6 Dígitos *
                 </label>
                 <input
+                  id="verification-code"
                   type="text"
                   required
                   maxLength={6}
-                  placeholder="123456"
+                  placeholder="000000"
                   value={codigo}
                   onChange={(e) => setCodigo(e.target.value)}
                   className="w-full border border-gray-300 p-3 rounded-xl text-center text-2xl font-mono tracking-widest font-black focus:ring-2 focus:ring-blue-900 focus:outline-none"
@@ -354,15 +379,16 @@ export default function AuthGate({ children }) {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                  Nueva contraseña (mín. 6 caracteres) *
+                <label htmlFor="new-account-password" className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                  {modoAcceso === "recuperar" ? "Nueva contraseña (mín. 8 caracteres) *" : "Define tu contraseña (mín. 8 caracteres) *"}
                 </label>
                 <input
+                  id="new-account-password"
                   type="password"
                   required
-                  minLength={6}
+                  minLength={8}
                   autoComplete="new-password"
-                  placeholder="Define tu contraseña"
+                  placeholder="Mínimo 8 caracteres"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none"
@@ -382,7 +408,11 @@ export default function AuthGate({ children }) {
                   disabled={loadingLogin}
                   className="w-2/3 bg-blue-950 hover:bg-blue-900 text-white font-bold py-3 rounded-xl text-sm transition shadow-md disabled:opacity-50"
                 >
-                  {loadingLogin ? "Validando..." : "Confirmar e Ingresar"}
+                  {loadingLogin
+                    ? "Validando..."
+                    : modoAcceso === "recuperar"
+                    ? "Restablecer e Ingresar"
+                    : "Crear Cuenta e Ingresar"}
                 </button>
               </div>
             </form>
@@ -392,33 +422,114 @@ export default function AuthGate({ children }) {
     );
   }
 
+  // PANTALLA BLOQUEANTE: Cambio obligatorio de contraseña si fue emitida por un admin
+  if (sesion?.debeCambiarPassword) {
+    return (
+      <div className="min-h-[78vh] flex items-center justify-center p-4">
+        <div className="auth-gate-card bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-xl border-2 border-amber-500 text-center animate-fade-in">
+          <div className="w-14 h-14 bg-amber-100 text-amber-900 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl font-black shadow-inner">
+            🔑
+          </div>
+          <h2 className="text-xl sm:text-2xl font-black text-blue-950 tracking-tight">
+            Cambio Obligatorio de Contraseña
+          </h2>
+          <p className="text-xs text-gray-600 mt-2 mb-4 leading-relaxed">
+            Iniciaste sesión con una contraseña temporal generada por el Comité Organizador. Por seguridad institucional, debes definir tu propia contraseña permanente para continuar.
+          </p>
+
+          {errorCambioObligatorio && (
+            <div className="p-3 mb-4 state-message state-message--error text-xs font-medium text-center" role="alert">
+              {errorCambioObligatorio}
+            </div>
+          )}
+
+          <form onSubmit={handleCambioObligatorio} className="space-y-4 text-left">
+            <div>
+              <label htmlFor="required-password" className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                Nueva Contraseña (mín. 8 caracteres) *
+              </label>
+              <input
+                id="required-password"
+                type="password"
+                required
+                minLength={8}
+                value={nuevaPasswordObligatoria}
+                onChange={(e) => setNuevaPasswordObligatoria(e.target.value)}
+                placeholder="Nueva contraseña segura"
+                className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="confirm-required-password" className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                Confirmar Nueva Contraseña *
+              </label>
+              <input
+                id="confirm-required-password"
+                type="password"
+                required
+                minLength={8}
+                value={confirmarPasswordObligatoria}
+                onChange={(e) => setConfirmarPasswordObligatoria(e.target.value)}
+                placeholder="Repite la contraseña"
+                className="w-full border border-gray-300 p-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-900 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loadingCambioObligatorio}
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3.5 rounded-xl text-sm transition shadow-md disabled:opacity-50"
+            >
+              {loadingCambioObligatorio ? "Actualizando..." : "Guardar Contraseña y Continuar →"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   // 2. MODAL OBLIGATORIO SI EL ESTUDIANTE FUE ANOTADO POR SU CAPITÁN PERO FALTA SU CARNET
   if (perfilIncompleto) {
     return (
       <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border-2 border-amber-500 animate-fade-in text-left">
+        <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border-2 border-amber-500 animate-fade-in text-left" role="dialog" aria-modal="true" aria-labelledby="incomplete-profile-title">
           <div className="flex items-center gap-2 mb-2 text-amber-600 font-extrabold text-sm uppercase tracking-wider">
-            <span>⚠️</span> Registro Oficial Incompleto
+            <span>{perfilIncompleto.estadoCarnet === "rechazado" ? "❌" : "⚠️"}</span>
+            <span>{perfilIncompleto.estadoCarnet === "rechazado" ? "Corrección de Documento Requerida" : "Registro Oficial Incompleto"}</span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-blue-950 tracking-tight">
-            Completa tu Carnet Estudiantil
+          <h2 id="incomplete-profile-title" className="text-xl sm:text-2xl font-black text-blue-950 tracking-tight">
+            {perfilIncompleto.estadoCarnet === "rechazado" ? "Vuelve a Subir tu Carnet Estudiantil" : "Completa tu Carnet Estudiantil"}
           </h2>
           <p className="text-xs text-gray-600 mt-1 mb-4">
-            Tu capitán te inscribió en el equipo <strong>{perfilIncompleto.nombreEquipo}</strong>, pero el reglamento oficial de MECAFUT 2026 exige que cada participante cargue su carnet estudiantil para validar su participación.
+            {perfilIncompleto.estadoCarnet === "rechazado" ? (
+              <>
+                El comité organizador revisó tu documento en el equipo <strong>{perfilIncompleto.nombreEquipo}</strong> y solicitó que subas una imagen legible para habilitar tu participación.
+              </>
+            ) : (
+              <>
+                Tu capitán te inscribió en el equipo <strong>{perfilIncompleto.nombreEquipo}</strong>, pero el reglamento oficial de MECAFUT 2026 exige que cada participante cargue su carnet estudiantil para validar su participación.
+              </>
+            )}
           </p>
 
+          {perfilIncompleto.motivoRechazo && (
+            <div className="p-3 mb-4 state-message state-message--error text-xs font-semibold" role="alert">
+              Motivo indicado por el Comité: <span className="font-normal">{perfilIncompleto.motivoRechazo}</span>
+            </div>
+          )}
+
           {errorPerfil && (
-            <div className="p-3 mb-4 bg-red-50 border border-red-300 text-red-800 text-xs rounded-xl font-medium">
+            <div className="p-3 mb-4 state-message state-message--error text-xs font-medium" role="alert">
               {errorPerfil}
             </div>
           )}
 
           <form onSubmit={handleCompletarPerfil} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-1">
+              <label htmlFor="incomplete-profile-dni" className="block text-xs font-bold text-gray-700 mb-1">
                 Número de Identidad (DNI) *
               </label>
               <input
+                id="incomplete-profile-dni"
                 required
                 placeholder="Ej. 0801-2003-12345"
                 value={completandoDni}
@@ -455,7 +566,9 @@ export default function AuthGate({ children }) {
                 </label>
               </div>
 
+              <label htmlFor="incomplete-profile-document" className="sr-only">Foto del carnet o matrícula</label>
               <input
+                id="incomplete-profile-document"
                 type="file"
                 required
                 accept="image/*,.pdf"

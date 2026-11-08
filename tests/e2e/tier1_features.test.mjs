@@ -29,19 +29,26 @@ import {
 } from '../../lib/bracketUtils.js';
 
 import * as dbService from '../../lib/dbService.js';
+import { verificarOtp } from '../../lib/authService.js';
 
 const {
   validarCorreoInstitucional,
+  obtenerEstadoCarnet,
   esJugadorHabilitado,
+  esEquipoAptoParaLlaves,
   obtenerResumenPublico,
   inscribirEquipo,
   obtenerDatosAdmin,
   actualizarDocumentoJugador,
+  revisarCarnetJugadorAdmin,
+  verificarCarnetsEquipoAdmin,
   reiniciarBaseDeDatosSimulada,
   guardarConfiguracionGeneral,
   actualizarEnlaceWhatsapp,
   suscribirTorneoEnVivo
 } = dbService;
+
+const VALID_CARNET_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD==";
 
 import { exportarExcelOficial } from '../../lib/exportUtils.js';
 
@@ -244,22 +251,27 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
   // F4: Helpers de Estado y Elegibilidad de Jugadores (ORIGINAL_REQUEST §4, PROJECT.md F4)
   // =========================================================================
   describe('F4: Helpers de Estado y Elegibilidad de Jugadores', () => {
-    it('F4-T1: esJugadorHabilitado retorna true si el estudiante tiene fotoDocumento', () => {
-      const jugador = {
+    it('F4-T1: esJugadorHabilitado retorna true si el estudiante tiene fotoDocumento y carnet verificado', () => {
+      const jugadorEnRevision = {
         nombre: "David Díaz",
         cuenta: "22011001",
         correo: "david.diaz@unitec.edu",
-        fotoDocumento: "data:image/jpeg;base64,carnetDavid"
+        fotoDocumento: VALID_CARNET_URL
       };
-      expect(esJugadorHabilitado(jugador)).toBe(true);
+      expect(obtenerEstadoCarnet(jugadorEnRevision)).toBe("en_revision");
+      expect(esJugadorHabilitado(jugadorEnRevision)).toBe(false);
+
+      const jugadorVerificado = { ...jugadorEnRevision, estadoCarnet: "verificado" };
+      expect(esJugadorHabilitado(jugadorVerificado)).toBe(true);
     });
 
-    it('F4-T2: esJugadorHabilitado retorna true si tiene foto_documento (formato DB/Supabase)', () => {
+    it('F4-T2: esJugadorHabilitado retorna true si tiene foto_documento y estado_carnet verificado (formato DB/Supabase)', () => {
       const jugador = {
         nombre: "Estudiante B",
         cuenta: "22011002",
         correo: "estudiante.b@unitec.edu",
-        foto_documento: "https://storage.supabase.co/carnet.jpg"
+        foto_documento: VALID_CARNET_URL,
+        estado_carnet: "verificado"
       };
       expect(esJugadorHabilitado(jugador)).toBe(true);
     });
@@ -527,11 +539,11 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
       expect(jugadores.every((j, i) => j.foto === `data-${i}`)).toBe(true);
     });
 
-    it('F7-T4: La asignación atómica de carnet habilita al jugador según esJugadorHabilitado', () => {
+    it('F7-T4: La asignación atómica de carnet y su verificación habilita al jugador según esJugadorHabilitado', () => {
       let jugador = { id: "jdiaz", nombre: "David Díaz", correo: "david@unitec.edu", fotoDocumento: null };
       expect(esJugadorHabilitado(jugador)).toBe(false);
 
-      jugador = { ...jugador, fotoDocumento: "data:image/jpeg;base64,carnetDavid" };
+      jugador = { ...jugador, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" };
       expect(esJugadorHabilitado(jugador)).toBe(true);
     });
 
@@ -556,7 +568,8 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
         id: `j${i}`,
         nombre: `J${i}`,
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: "data:carnet"
+        fotoDocumento: VALID_CARNET_URL,
+        estadoCarnet: "verificado"
       }));
 
       const totalHabilitados = jugadores.filter(esJugadorHabilitado).length;
@@ -564,12 +577,13 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
       expect(totalHabilitados >= CONFIG_TORNEO.plantilla.min).toBe(true);
     });
 
-    it('F8-T2: Equipo con 7 con carnet y 1 sin carnet es incompleto (totalHabilitados === 7)', () => {
+    it('F8-T2: Equipo con 7 con carnet verificado y 1 sin carnet es incompleto (totalHabilitados === 7)', () => {
       const jugadores = Array.from({ length: 8 }, (_, i) => ({
         id: `j${i}`,
         nombre: `J${i}`,
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: i < 7 ? "data:carnet" : null
+        fotoDocumento: i < 7 ? VALID_CARNET_URL : null,
+        estadoCarnet: i < 7 ? "verificado" : "pendiente"
       }));
 
       const totalHabilitados = jugadores.filter(esJugadorHabilitado).length;
@@ -582,12 +596,13 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
       expect(esJugadorHabilitado(jPendiente)).toBe(false);
     });
 
-    it('F8-T4: Plantilla de 12 jugadores con 8 con carnet y 4 pendientes es apta para jugar', () => {
+    it('F8-T4: Plantilla de 12 jugadores con 8 con carnet verificado y 4 pendientes es apta para jugar', () => {
       const jugadores = Array.from({ length: 12 }, (_, i) => ({
         id: `j${i}`,
         nombre: `J${i}`,
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: i < 8 ? "data:carnet" : null
+        fotoDocumento: i < 8 ? VALID_CARNET_URL : null,
+        estadoCarnet: i < 8 ? "verificado" : "pendiente"
       }));
 
       const habilitados = jugadores.filter(esJugadorHabilitado).length;
@@ -595,18 +610,24 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
       expect(habilitados >= CONFIG_TORNEO.plantilla.min).toBe(true);
     });
 
-    it('F8-T5: Al subir el carnet del jugador 8vo, el equipo pasa de no-apto a apto', () => {
+    it('F8-T5: Al subir y verificar el carnet del jugador 8vo, el equipo pasa de no-apto a apto', () => {
       const jugadores = Array.from({ length: 8 }, (_, i) => ({
         id: `j${i}`,
         nombre: `J${i}`,
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: i < 7 ? "data:carnet" : null
+        fotoDocumento: i < 7 ? VALID_CARNET_URL : null,
+        estadoCarnet: i < 7 ? "verificado" : "pendiente"
       }));
 
       expect(jugadores.filter(esJugadorHabilitado).length >= 8).toBe(false);
 
-      // Subida de carnet para el 8vo jugador
-      jugadores[7].fotoDocumento = "data:carnetSubido";
+      // Subida de carnet para el 8vo jugador (en revisión aún no habilita)
+      jugadores[7].fotoDocumento = VALID_CARNET_URL;
+      jugadores[7].estadoCarnet = "en_revision";
+      expect(jugadores.filter(esJugadorHabilitado).length >= 8).toBe(false);
+
+      // Verificación por Admin habilita al 8vo jugador
+      jugadores[7].estadoCarnet = "verificado";
       expect(jugadores.filter(esJugadorHabilitado).length >= 8).toBe(true);
     });
   });
@@ -666,11 +687,12 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin1 = await obtenerDatosAdmin();
       const jugador = admin1.jugadores.find(j => j.cuenta === "22019999");
       expect(jugador).toBeTruthy();
 
-      const nuevaFoto = "data:image/jpeg;base64,nuevaFotoAdmin";
+      const nuevaFoto = "data:image/jpeg;base64,nuevaFotoAdminValida12345";
       const ok = await actualizarDocumentoJugador({ jugadorId: jugador.id, fotoDocumento: nuevaFoto });
       expect(ok).toBe(true);
 
@@ -679,7 +701,7 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
       expect(jugadorAct.fotoDocumento).toBe(nuevaFoto);
     });
 
-    it('F10-T2: actualizarDocumentoJugador debe cambiar el estado del jugador a Aprobado', async () => {
+    it('F10-T2: actualizarDocumentoJugador desde Admin debe cambiar el estado del jugador a Aprobado y verificado', async () => {
       const datos = crearEquipoBase({
         jugadores: [{
           nombre: "Jugador Estado",
@@ -690,16 +712,18 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin1 = await obtenerDatosAdmin();
       const jugador = admin1.jugadores.find(j => j.cuenta === "22018888");
 
-      await actualizarDocumentoJugador({ jugadorId: jugador.id, fotoDocumento: "data:image/jpeg;base64,fotoCarnet" });
+      await actualizarDocumentoJugador({ jugadorId: jugador.id, fotoDocumento: "data:image/jpeg;base64,fotoCarnetAdmin12345" });
       const admin2 = await obtenerDatosAdmin();
       const jugadorAct = admin2.jugadores.find(j => j.id === jugador.id);
       expect(jugadorAct.estado).toBe("Aprobado");
+      expect(jugadorAct.estadoCarnet).toBe("verificado");
     });
 
-    it('F10-T3: Carnet subido convierte a jugador en habilitado según esJugadorHabilitado', async () => {
+    it('F10-T3: Carnet subido por Admin convierte a jugador en habilitado según esJugadorHabilitado', async () => {
       const datos = crearEquipoBase({
         jugadores: [{
           nombre: "Jugador Habil",
@@ -710,11 +734,12 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       let admin = await obtenerDatosAdmin();
       let j = admin.jugadores.find(x => x.cuenta === "22017777");
       expect(esJugadorHabilitado(j)).toBe(false);
 
-      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,carnetSubidoAdmin" });
+      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,carnetSubidoAdmin12345" });
       admin = await obtenerDatosAdmin();
       j = admin.jugadores.find(x => x.id === j.id);
       expect(esJugadorHabilitado(j)).toBe(true);
@@ -727,17 +752,19 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
           cuenta: "22016666",
           correo: "over@unitec.edu",
           dni: "0501-1999-66666",
-          fotoDocumento: "foto_antigua"
+          fotoDocumento: "data:image/jpeg;base64,fotoAntiguaValida123"
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin = await obtenerDatosAdmin();
       const j = admin.jugadores.find(x => x.cuenta === "22016666");
 
-      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "foto_actualizada" });
+      const fotoNueva = "data:image/jpeg;base64,fotoActualizadaValida456";
+      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: fotoNueva });
       const admin2 = await obtenerDatosAdmin();
       const jAct = admin2.jugadores.find(x => x.id === j.id);
-      expect(jAct.fotoDocumento).toBe("foto_actualizada");
+      expect(jAct.fotoDocumento).toBe(fotoNueva);
     });
 
     it('F10-T5: Permite especificar tipo de documento carnet o matrícula', async () => {
@@ -751,10 +778,11 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin = await obtenerDatosAdmin();
       const j = admin.jugadores.find(x => x.cuenta === "22015555");
 
-      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,hojaMatricula", tipoDocumento: "matricula" });
+      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,hojaMatriculaOficial123", tipoDocumento: "matricula" });
       const admin2 = await obtenerDatosAdmin();
       const jAct = admin2.jugadores.find(x => x.id === j.id);
       expect(jAct.tipoDocumento).toBe("matricula");
@@ -765,59 +793,51 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
   // F11: Filtro de Elegibilidad para Llaves en /admin (ORIGINAL_REQUEST §4, PROJECT.md F11)
   // =========================================================================
   describe('F11: Filtro de Elegibilidad para Llaves en /admin', () => {
-    // Definición de regla pura de elegibilidad según PROJECT.md F11:
-    // Equipo elegible = (estadoPago === "Confirmado" o "Pagado" o "aprobado") && (jugadoresConCarnet >= 8)
-    function esEquipoAptoParaLlaves(equipo, todosJugadores) {
-      const estadoPago = (equipo.estado || "Pendiente").toLowerCase();
-      const pagoAprobado = estadoPago === "confirmado" || estadoPago === "pagado" || estadoPago === "aprobado";
-      if (!pagoAprobado) return false;
-
-      const integrantes = todosJugadores.filter(j => j.equipoId === equipo.id);
-      const habilitados = integrantes.filter(esJugadorHabilitado).length;
-      return habilitados >= CONFIG_TORNEO.plantilla.min;
-    }
-
-    it('F11-T1: Equipo con pago confirmado y 8 jugadores con carnet es elegible', () => {
+    it('F11-T1: Equipo con pago confirmado y 8 jugadores con carnet verificado es elegible', () => {
       const eq = { id: "eq1", nombre: "Confirmado FC", estado: "Confirmado" };
       const jug = Array.from({ length: 8 }, (_, i) => ({
         id: `j${i}`,
         equipoId: "eq1",
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: "carnet"
+        fotoDocumento: VALID_CARNET_URL,
+        estadoCarnet: "verificado"
       }));
       expect(esEquipoAptoParaLlaves(eq, jug)).toBe(true);
     });
 
-    it('F11-T2: Equipo con pago confirmado pero solo 7 jugadores con carnet NO es elegible', () => {
+    it('F11-T2: Equipo con pago confirmado pero solo 7 jugadores con carnet verificado NO es elegible', () => {
       const eq = { id: "eq2", nombre: "Incompleto FC", estado: "Confirmado" };
       const jug = Array.from({ length: 8 }, (_, i) => ({
         id: `j${i}`,
         equipoId: "eq2",
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: i < 7 ? "carnet" : null
+        fotoDocumento: i < 7 ? VALID_CARNET_URL : null,
+        estadoCarnet: i < 7 ? "verificado" : "pendiente"
       }));
       expect(esEquipoAptoParaLlaves(eq, jug)).toBe(false);
     });
 
-    it('F11-T3: Equipo con 8 carnets pero estado Pendiente (sin pago validado) NO es elegible', () => {
+    it('F11-T3: Equipo con 8 carnets verificados pero estado Pendiente (sin pago validado) NO es elegible', () => {
       const eq = { id: "eq3", nombre: "Sin Pago FC", estado: "Pendiente" };
       const jug = Array.from({ length: 8 }, (_, i) => ({
         id: `j${i}`,
         equipoId: "eq3",
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: "carnet"
+        fotoDocumento: VALID_CARNET_URL,
+        estadoCarnet: "verificado"
       }));
       expect(esEquipoAptoParaLlaves(eq, jug)).toBe(false);
     });
 
-    it('F11-T4: Equipo con 7 estudiantes con carnet + 1 docente autorizado es elegible', () => {
+    it('F11-T4: Equipo con 7 estudiantes con carnet verificado + 1 docente autorizado es elegible', () => {
       const eq = { id: "eq4", nombre: "Docente FC", estado: "Confirmado" };
       const jug = [
         ...Array.from({ length: 7 }, (_, i) => ({
           id: `j${i}`,
           equipoId: "eq4",
           correo: `j${i}@unitec.edu`,
-          fotoDocumento: "carnet"
+          fotoDocumento: VALID_CARNET_URL,
+          estadoCarnet: "verificado"
         })),
         {
           id: "doc1",
@@ -836,12 +856,12 @@ describe('Tier 1: Feature Coverage (F1 through F14)', () => {
         { id: "e3", nombre: "Incompleto", estado: "Confirmado" }
       ];
       const jugadores = [
-        // e1: 8 carnets
-        ...Array.from({ length: 8 }, (_, i) => ({ id: `e1_j${i}`, equipoId: "e1", correo: `e1_${i}@unitec.edu`, fotoDocumento: "foto" })),
-        // e2: 8 carnets
-        ...Array.from({ length: 8 }, (_, i) => ({ id: `e2_j${i}`, equipoId: "e2", correo: `e2_${i}@unitec.edu`, fotoDocumento: "foto" })),
-        // e3: 5 carnets
-        ...Array.from({ length: 5 }, (_, i) => ({ id: `e3_j${i}`, equipoId: "e3", correo: `e3_${i}@unitec.edu`, fotoDocumento: "foto" }))
+        // e1: 8 carnets verificados
+        ...Array.from({ length: 8 }, (_, i) => ({ id: `e1_j${i}`, equipoId: "e1", correo: `e1_${i}@unitec.edu`, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" })),
+        // e2: 8 carnets verificados
+        ...Array.from({ length: 8 }, (_, i) => ({ id: `e2_j${i}`, equipoId: "e2", correo: `e2_${i}@unitec.edu`, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" })),
+        // e3: 5 carnets verificados
+        ...Array.from({ length: 5 }, (_, i) => ({ id: `e3_j${i}`, equipoId: "e3", correo: `e3_${i}@unitec.edu`, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }))
       ];
 
       const filtrados = equipos.filter(e => esEquipoAptoParaLlaves(e, jugadores));

@@ -69,7 +69,7 @@ export default function ModalBetaAlert() {
 
   return (
     <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl max-w-lg w-full border-2 border-red-500 shadow-2xl overflow-hidden relative transform transition-all">
+      <div className="bg-white rounded-2xl max-w-lg w-full border-2 border-red-500 shadow-2xl overflow-hidden relative transform transition-all" role="dialog" aria-modal="true" aria-labelledby="beta-dialog-title" aria-describedby="beta-dialog-description">
         {/* Barra superior de alerta */}
         <div className="bg-red-600 text-white px-5 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -96,10 +96,10 @@ export default function ModalBetaAlert() {
           <div className="flex items-start gap-3">
             <span className="text-3xl flex-shrink-0">❗</span>
             <div className="space-y-2 text-xs sm:text-sm text-gray-800 leading-relaxed">
-              <h3 className="font-extrabold text-red-950 text-base">
+              <h2 id="beta-dialog-title" className="font-extrabold text-red-950 text-base">
                 Aviso Importante al Usuario
-              </h3>
-              <p>
+              </h2>
+              <p id="beta-dialog-description">
                 La plataforma web de <strong>MECAFUT 2026</strong> se encuentra actualmente en <strong>fase de desarrollo activo (BETA)</strong>.
               </p>
               <p className="text-gray-700">

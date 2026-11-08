@@ -28,10 +28,12 @@ import {
 } from '../../lib/bracketUtils.js';
 
 import * as dbService from '../../lib/dbService.js';
+import { verificarOtp } from '../../lib/authService.js';
 
 const {
   validarCorreoInstitucional,
   esJugadorHabilitado,
+  esEquipoAptoParaLlaves,
   obtenerResumenPublico,
   inscribirEquipo,
   obtenerDatosAdmin,
@@ -41,6 +43,8 @@ const {
   actualizarEnlaceWhatsapp,
   suscribirTorneoEnVivo
 } = dbService;
+
+const VALID_CARNET_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD==";
 
 import { exportarExcelOficial } from '../../lib/exportUtils.js';
 
@@ -434,7 +438,7 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
     it('F7-B5: Foto simulada de alta resolución en Base64 mantiene su integridad binaria', () => {
       const bigString = "data:image/jpeg;base64," + "A".repeat(5000);
       let j = { id: "j1", fotoDocumento: null };
-      j = { ...j, fotoDocumento: bigString };
+      j = { ...j, fotoDocumento: bigString, estadoCarnet: "verificado" };
       expect(j.fotoDocumento.length).toBe(bigString.length);
       expect(esJugadorHabilitado(j)).toBe(true);
     });
@@ -451,11 +455,12 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
       expect(habilitados >= CONFIG_TORNEO.plantilla.min).toBe(false);
     });
 
-    it('F8-B2: Plantilla con exactamente 8 jugadores, todos con carnet (frontera exacta de aptitud)', () => {
+    it('F8-B2: Plantilla con exactamente 8 jugadores, todos con carnet verificado (frontera exacta de aptitud)', () => {
       const jugadores = Array.from({ length: 8 }, (_, i) => ({
         id: `j${i}`,
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: "carnet"
+        fotoDocumento: VALID_CARNET_URL,
+        estadoCarnet: "verificado"
       }));
       expect(jugadores.filter(esJugadorHabilitado).length).toBe(8);
       expect(jugadores.filter(esJugadorHabilitado).length >= CONFIG_TORNEO.plantilla.min).toBe(true);
@@ -471,19 +476,20 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
       expect(jugadores.filter(esJugadorHabilitado).length >= CONFIG_TORNEO.plantilla.min).toBe(false);
     });
 
-    it('F8-B4: Plantilla máxima de 15 jugadores, los 15 con carnet: apto (15/8)', () => {
+    it('F8-B4: Plantilla máxima de 15 jugadores, los 15 con carnet verificado: apto (15/8)', () => {
       const jugadores = Array.from({ length: 15 }, (_, i) => ({
         id: `j${i}`,
         correo: `j${i}@unitec.edu`,
-        fotoDocumento: "carnet"
+        fotoDocumento: VALID_CARNET_URL,
+        estadoCarnet: "verificado"
       }));
       expect(jugadores.filter(esJugadorHabilitado).length).toBe(15);
       expect(jugadores.filter(esJugadorHabilitado).length >= CONFIG_TORNEO.plantilla.min).toBe(true);
     });
 
-    it('F8-B5: Plantilla con 8 jugadores donde 1 es docente exento y 7 son estudiantes con carnet: apto', () => {
+    it('F8-B5: Plantilla con 8 jugadores donde 1 es docente exento y 7 son estudiantes con carnet verificado: apto', () => {
       const jugadores = [
-        ...Array.from({ length: 7 }, (_, i) => ({ id: `j${i}`, correo: `j${i}@unitec.edu`, fotoDocumento: "carnet" })),
+        ...Array.from({ length: 7 }, (_, i) => ({ id: `j${i}`, correo: `j${i}@unitec.edu`, fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" })),
         { id: "doc", correo: "juan.mejia@unitec.edu.hn", fotoDocumento: null }
       ];
       expect(jugadores.filter(esJugadorHabilitado).length).toBe(8);
@@ -544,7 +550,7 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
     it('F10-B1: Invocar con jugadorId nulo arroja error de validación', async () => {
       let errCapturado = false;
       try {
-        await actualizarDocumentoJugador({ jugadorId: null, fotoDocumento: "foto" });
+        await actualizarDocumentoJugador({ jugadorId: null, fotoDocumento: VALID_CARNET_URL });
       } catch (e) {
         errCapturado = true;
       }
@@ -552,7 +558,7 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
     });
 
     it('F10-B2: Actualizar jugador inexistente no lanza uncaught crash y retorna false o no afecta', async () => {
-      const res = await actualizarDocumentoJugador({ jugadorId: "inexistente-12345", fotoDocumento: "foto" });
+      const res = await actualizarDocumentoJugador({ jugadorId: "inexistente-12345", fotoDocumento: VALID_CARNET_URL });
       expect(typeof res === 'boolean').toBe(true);
     });
 
@@ -567,6 +573,7 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin = await obtenerDatosAdmin();
       const j = admin.jugadores.find(x => x.cuenta === "22014444");
 
@@ -590,10 +597,11 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin = await obtenerDatosAdmin();
       const j = admin.jugadores.find(x => x.cuenta === "22013333");
 
-      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "nueva_foto" });
+      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,nuevaFotoPreservada123" });
       const admin2 = await obtenerDatosAdmin();
       const act = admin2.jugadores.find(x => x.id === j.id);
       expect(act.cuenta).toBe("22013333");
@@ -610,10 +618,11 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
         }]
       });
       await inscribirEquipo(datos);
+      verificarOtp("carlos.rubi@unitec.edu", "123456");
       const admin = await obtenerDatosAdmin();
       const j = admin.jugadores.find(x => x.correo === "juan.mejia@unitec.edu.hn");
 
-      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "foto_docente" });
+      await actualizarDocumentoJugador({ jugadorId: j.id, fotoDocumento: "data:image/jpeg;base64,fotoDocenteValida12345" });
       const admin2 = await obtenerDatosAdmin();
       const act = admin2.jugadores.find(x => x.id === j.id);
       expect(act.dni).toBe("Exento (Docente)");
@@ -625,39 +634,29 @@ describe('Tier 2: Boundary & Corner Cases (F1 through F14)', () => {
   // F11: Filtro de Elegibilidad para Llaves en /admin (Boundaries)
   // =========================================================================
   describe('F11: Filtro de Elegibilidad para Llaves en /admin (Boundaries)', () => {
-    function esEquipoAptoParaLlaves(equipo, todosJugadores) {
-      const estadoPago = (equipo.estado || "Pendiente").toLowerCase();
-      const pagoAprobado = estadoPago === "confirmado" || estadoPago === "pagado" || estadoPago === "aprobado";
-      if (!pagoAprobado) return false;
-
-      const integrantes = todosJugadores.filter(j => j.equipoId === equipo.id);
-      const habilitados = integrantes.filter(esJugadorHabilitado).length;
-      return habilitados >= CONFIG_TORNEO.plantilla.min;
-    }
-
-    it('F11-B1: Frontera exacta: 8 jugadores con carnet + pago Confirmado = Elegible', () => {
+    it('F11-B1: Frontera exacta: 8 jugadores con carnet verificado + pago Confirmado = Elegible', () => {
       const eq = { id: "eq1", estado: "Confirmado" };
-      const jug = Array.from({ length: 8 }, (_, i) => ({ id: `j${i}`, equipoId: "eq1", fotoDocumento: "foto" }));
+      const jug = Array.from({ length: 8 }, (_, i) => ({ id: `j${i}`, equipoId: "eq1", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }));
       expect(esEquipoAptoParaLlaves(eq, jug)).toBe(true);
     });
 
-    it('F11-B2: Frontera - 1: 7 jugadores con carnet + pago Confirmado = Inelegible', () => {
+    it('F11-B2: Frontera - 1: 7 jugadores con carnet verificado + pago Confirmado = Inelegible', () => {
       const eq = { id: "eq2", estado: "Confirmado" };
-      const jug = Array.from({ length: 7 }, (_, i) => ({ id: `j${i}`, equipoId: "eq2", fotoDocumento: "foto" }));
+      const jug = Array.from({ length: 7 }, (_, i) => ({ id: `j${i}`, equipoId: "eq2", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }));
       expect(esEquipoAptoParaLlaves(eq, jug)).toBe(false);
     });
 
-    it('F11-B3: Plantilla máxima (15 con carnet) pero estado pago "Pendiente" = Inelegible', () => {
+    it('F11-B3: Plantilla máxima (15 con carnet verificado) pero estado pago "Pendiente" = Inelegible', () => {
       const eq = { id: "eq3", estado: "Pendiente" };
-      const jug = Array.from({ length: 15 }, (_, i) => ({ id: `j${i}`, equipoId: "eq3", fotoDocumento: "foto" }));
+      const jug = Array.from({ length: 15 }, (_, i) => ({ id: `j${i}`, equipoId: "eq3", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }));
       expect(esEquipoAptoParaLlaves(eq, jug)).toBe(false);
     });
 
     it('F11-B4: Acepta variaciones de mayúsculas en estado de pago ("PAGADO", "aprobado")', () => {
       const eq1 = { id: "e1", estado: "PAGADO" };
       const eq2 = { id: "e2", estado: "aprobado" };
-      const jug1 = Array.from({ length: 8 }, (_, i) => ({ id: `j1_${i}`, equipoId: "e1", fotoDocumento: "f" }));
-      const jug2 = Array.from({ length: 8 }, (_, i) => ({ id: `j2_${i}`, equipoId: "e2", fotoDocumento: "f" }));
+      const jug1 = Array.from({ length: 8 }, (_, i) => ({ id: `j1_${i}`, equipoId: "e1", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }));
+      const jug2 = Array.from({ length: 8 }, (_, i) => ({ id: `j2_${i}`, equipoId: "e2", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado" }));
 
       expect(esEquipoAptoParaLlaves(eq1, jug1)).toBe(true);
       expect(esEquipoAptoParaLlaves(eq2, jug2)).toBe(true);

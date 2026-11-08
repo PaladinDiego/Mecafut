@@ -1,18 +1,29 @@
 "use client";
-import { useState, useEffect } from "react";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  obtenerSesionActual,
-  cerrarSesion
-} from "../lib/authService";
-import { obtenerEstadoTorneo, suscribirTorneoEnVivo } from "../lib/dbService";
+  AlertTriangle,
+  ClipboardList,
+  LogOut,
+  Menu,
+  ShieldCheck,
+  Trophy,
+  UsersRound,
+  X,
+} from "lucide-react";
+import { obtenerSesionActual, cerrarSesion } from "../lib/authService";
+import { suscribirTorneoEnVivo } from "../lib/dbService";
+import { obtenerFechaLocalHonduras } from "../lib/torneoConfig";
 import ModalBetaAlert from "./ModalBetaAlert";
+import BrandMark from "./BrandMark";
 
 export default function Navbar() {
   const pathname = usePathname();
   const [sesion, setSesion] = useState(null);
   const [torneoVisible, setTorneoVisible] = useState(false);
+  const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
 
   useEffect(() => {
     actualizarSesion();
@@ -28,6 +39,10 @@ export default function Navbar() {
       if (typeof unsub === "function") unsub();
     };
   }, []);
+
+  useEffect(() => {
+    setMenuMovilAbierto(false);
+  }, [pathname]);
 
   const actualizarSesion = () => {
     const s = obtenerSesionActual();
@@ -47,10 +62,8 @@ export default function Navbar() {
       return;
     }
 
-    // Modo "auto": Se habilita si hoy >= fechaEvento
     if (fechaEvento) {
-      const hoyStr = new Date().toISOString().split("T")[0];
-      setTorneoVisible(hoyStr >= fechaEvento);
+      setTorneoVisible(obtenerFechaLocalHonduras() >= fechaEvento);
     } else {
       setTorneoVisible(false);
     }
@@ -59,6 +72,7 @@ export default function Navbar() {
   const handleCerrarSesion = () => {
     cerrarSesion();
     setSesion(null);
+    setMenuMovilAbierto(false);
   };
 
   const reabrirReglamento = () => {
@@ -71,125 +85,100 @@ export default function Navbar() {
 
   const esAdmin = sesion?.rol === "admin";
   const mostrarEnlaceTorneo = torneoVisible || esAdmin;
+  const etiquetaRol = sesion?.rol === "admin" && sesion.esDocente
+    ? "Administrador y docente"
+    : sesion?.rol === "admin"
+      ? "Administrador"
+      : sesion?.rol === "docente"
+        ? "Docente"
+        : "Estudiante";
 
   return (
-    <header>
+    <header className="site-header">
       <ModalBetaAlert />
-      <nav className="bg-blue-950 text-white p-4 shadow-md sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto flex flex-wrap justify-between items-center gap-3">
-          <Link href="/" className="flex items-center gap-2 hover:opacity-90 transition">
-            <span className="text-2xl">⚽</span>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">MECAFUT Q4 2026</h1>
-              <p className="text-xs text-blue-200">Torneo de Ingeniería Mecatrónica</p>
-            </div>
+      <div className="site-header__inner">
+        <Link href="/" className="brand-link" aria-label="MECAFUT, ir a inscripción">
+          <BrandMark />
+          <span>
+            <span className="brand-link__name">MECAFUT Q4 2026</span>
+            <span className="brand-link__sub">Torneo de Ingeniería Mecatrónica</span>
+          </span>
+        </Link>
+
+        <button
+          className="mobile-menu-toggle"
+          type="button"
+          aria-expanded={menuMovilAbierto}
+          aria-controls="primary-navigation"
+          onClick={() => setMenuMovilAbierto((open) => !open)}
+        >
+          {menuMovilAbierto ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
+          <span>{menuMovilAbierto ? "Cerrar" : "Menú"}</span>
+        </button>
+
+        <nav
+          id="primary-navigation"
+          className="site-navigation"
+          data-open={menuMovilAbierto}
+          aria-label="Navegación principal"
+        >
+          <Link href="/" aria-current={pathname === "/" ? "page" : undefined} className="site-navigation__link">
+            Inscripción
+          </Link>
+          <Link href="/equipo" aria-current={pathname === "/equipo" ? "page" : undefined} className="site-navigation__link">
+            <UsersRound size={16} aria-hidden="true" /> Equipo
           </Link>
 
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm font-medium">
+          {mostrarEnlaceTorneo && (
             <Link
-              href="/"
-              className={`transition-colors px-2.5 py-1 rounded-lg ${
-                pathname === "/" ? "text-white font-bold bg-blue-900/70" : "text-blue-100 hover:text-white"
-              }`}
+              href="/torneo"
+              aria-current={pathname === "/torneo" ? "page" : undefined}
+              className="site-navigation__link site-navigation__link--live"
             >
-              Inscribir Equipo
+              <Trophy size={16} aria-hidden="true" /> Torneo en vivo
+              {esAdmin && !torneoVisible && <span aria-label="Vista previa administrativa">· Admin</span>}
             </Link>
+          )}
 
+          <button type="button" onClick={reabrirReglamento} className="site-navigation__action">
+            <ClipboardList size={16} aria-hidden="true" /> Reglamento
+          </button>
+
+          <button
+            type="button"
+            onClick={abrirReporteProblema}
+            className="site-navigation__action site-navigation__action--report"
+          >
+            <AlertTriangle size={16} aria-hidden="true" /> Reportar Problema
+          </button>
+
+          {esAdmin && (
             <Link
-              href="/equipo"
-              className={`transition-colors px-2.5 py-1 rounded-lg ${
-                pathname === "/equipo" ? "text-white font-bold bg-blue-900/70" : "text-blue-100 hover:text-white"
-              }`}
+              href="/admin"
+              aria-current={pathname === "/admin" ? "page" : undefined}
+              className="site-navigation__link site-navigation__link--admin"
             >
-              Consultar Código
+              <ShieldCheck size={16} aria-hidden="true" /> Administración
             </Link>
+          )}
 
-            {/* Enlace al Torneo y Resultados en Vivo (Visible el día del evento o para Admin) */}
-            {mostrarEnlaceTorneo && (
-              <Link
-                href="/torneo"
-                className={`transition-colors px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
-                  pathname === "/torneo"
-                    ? "text-white font-black bg-emerald-700 shadow"
-                    : "bg-emerald-900/60 hover:bg-emerald-800 text-emerald-100"
-                }`}
+          {sesion && (
+            <>
+              <span className="site-navigation__role" title={`${sesion.nombre || "Cuenta"}: ${etiquetaRol}`}>
+                {sesion.nombre || sesion.correo.split("@")[0]} · {etiquetaRol}
+              </span>
+              <button
+                type="button"
+                onClick={handleCerrarSesion}
+                className="site-navigation__action"
+                aria-label="Cerrar sesión"
               >
-                <span>🏆</span>
-                <span>Torneo en Vivo</span>
-                {esAdmin && !torneoVisible && (
-                  <span className="text-[9px] bg-amber-400 text-black px-1 rounded font-bold uppercase">
-                    Admin
-                  </span>
-                )}
-              </Link>
-            )}
-
-            {/* Botón para Releer el Reglamento */}
-            <button
-              type="button"
-              onClick={reabrirReglamento}
-              className="text-blue-200 hover:text-white hover:bg-blue-900/50 px-2 py-1 rounded text-xs transition flex items-center gap-1"
-              title="Consultar Reglamento Oficial"
-            >
-              <span>📋</span>
-              <span className="hidden sm:inline">Reglamento</span>
-            </button>
-
-            {/* Botón Permanente de Reportar Problema (Follow-up 2) */}
-            <button
-              type="button"
-              onClick={abrirReporteProblema}
-              className="bg-red-900/60 hover:bg-red-800 text-red-100 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border border-red-700/60 shadow-sm"
-              title="Reportar un problema técnico o error en la plataforma"
-            >
-              <span>⚠️</span>
-              <span className="hidden sm:inline">Reportar Problema</span>
-              <span className="sm:hidden">Reportar</span>
-            </button>
-
-            {/* Botón Administrador: Solo para rol 'admin' */}
-            {esAdmin && (
-              <Link
-                href="/admin"
-                className={`bg-blue-800 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors text-white font-bold flex items-center gap-1.5 shadow ${
-                  pathname === "/admin" ? "ring-2 ring-white" : ""
-                }`}
-              >
-                <span>🛡️</span>
-                <span>Administrador</span>
-              </Link>
-            )}
-
-            {/* Perfil de Usuario con Sesión Activa */}
-            {sesion && (
-              <div className="flex items-center gap-2 bg-blue-900/80 px-3 py-1 rounded-full border border-blue-700 text-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                <div className="text-left max-w-[120px] sm:max-w-[180px] truncate">
-                  <strong className="block text-white leading-tight truncate">
-                    {sesion.nombre || sesion.correo.split("@")[0]}
-                  </strong>
-                  <span className="text-[10px] text-blue-200 uppercase font-semibold block truncate">
-                    {sesion.rol === "admin" && sesion.esDocente
-                      ? "👑 Admin / 🎓 Docente"
-                      : sesion.rol === "admin"
-                      ? "👑 Admin"
-                      : sesion.rol === "docente"
-                      ? "🎓 Docente"
-                      : "⚽ Estudiante"}
-                  </span>
-                </div>
-                <button
-                  onClick={handleCerrarSesion}
-                  title="Cerrar Sesión"
-                  className="ml-1 text-blue-300 hover:text-white hover:bg-blue-800 px-1.5 py-0.5 rounded transition"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </nav>
+                <LogOut size={16} aria-hidden="true" /> Cerrar sesión
+              </button>
+            </>
+          )}
+        </nav>
+      </div>
     </header>
   );
 }

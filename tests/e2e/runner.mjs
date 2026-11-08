@@ -80,6 +80,12 @@ export function expect(actual) {
     toBeFalsy() {
       assert.ok(!actual, `Expected ${JSON.stringify(actual)} to be falsy`);
     },
+    toBeDefined() {
+      assert.ok(actual !== undefined, `Expected value to be defined, but received undefined`);
+    },
+    toBeUndefined() {
+      assert.strictEqual(actual, undefined, `Expected ${JSON.stringify(actual)} to be undefined`);
+    },
     toBeGreaterThan(expected) {
       assert.ok(actual > expected, `Expected ${actual} to be greater than ${expected}`);
     },
@@ -376,7 +382,9 @@ if (isDirectCli) {
         'tier1_features.test.mjs',
         'tier2_boundaries.test.mjs',
         'tier3_pairwise.test.mjs',
-        'tier4_workloads.test.mjs'
+        'tier4_workloads.test.mjs',
+        'tier5_security_audit_patch.test.mjs',
+        'tier6_kiss_classes_security.test.mjs'
       ];
 
       const filter = args[0] ? args[0].toLowerCase() : null;

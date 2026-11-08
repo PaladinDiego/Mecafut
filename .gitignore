@@ -28,3 +28,7 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# local tooling & agents
+.playwright-mcp/
+.agents/

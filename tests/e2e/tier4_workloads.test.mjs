@@ -30,14 +30,18 @@ import {
 } from '../../lib/bracketUtils.js';
 
 import * as dbService from '../../lib/dbService.js';
+import { verificarOtp } from '../../lib/authService.js';
 
 const {
   validarCorreoInstitucional,
   esJugadorHabilitado,
+  esEquipoAptoParaLlaves,
   obtenerResumenPublico,
   inscribirEquipo,
   obtenerDatosAdmin,
   actualizarDocumentoJugador,
+  revisarCarnetJugadorAdmin,
+  verificarCarnetsEquipoAdmin,
   reiniciarBaseDeDatosSimulada,
   guardarConfiguracionGeneral,
   actualizarEnlaceWhatsapp,
@@ -45,6 +49,8 @@ const {
   guardarBracketCategoria,
   guardarTorneoCompleto
 } = dbService;
+
+const VALID_CARNET_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD==";
 
 import { exportarExcelOficial } from '../../lib/exportUtils.js';
 
@@ -58,16 +64,6 @@ const readXLSX = (filePath) => {
 };
 
 const excelFileName = `Mecafut_${CONFIG_TORNEO.periodo.replace(/\s+/g, "_")}_Inscripciones.xlsx`;
-
-function esEquipoAptoParaLlaves(equipo, todosJugadores) {
-  const estadoPago = (equipo.estado || "Pendiente").toLowerCase();
-  const pagoAprobado = estadoPago === "confirmado" || estadoPago === "pagado" || estadoPago === "aprobado";
-  if (!pagoAprobado) return false;
-
-  const integrantes = todosJugadores.filter(j => j.equipoId === equipo.id);
-  const habilitados = integrantes.filter(esJugadorHabilitado).length;
-  return habilitados >= CONFIG_TORNEO.plantilla.min;
-}
 
 describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () => {
 
@@ -157,17 +153,16 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
   // =========================================================================
   it('Escenario 2: Actualización atómica de carnets de jugadores concurrentes previene pérdida de fotos', async () => {
     let jugadoresEnEstado = [
-      { id: "j1", nombre: "Capitán", fotoDocumento: "fotoCapitan", estado: "Aprobado" },
-      { id: "j2", nombre: "David Díaz", fotoDocumento: null, estado: "Pendiente" },
-      { id: "j3", nombre: "Andrés Valle", fotoDocumento: null, estado: "Pendiente" },
-      { id: "j4", nombre: "José Rodas", fotoDocumento: null, estado: "Pendiente" }
+      { id: "j1", nombre: "Capitán", fotoDocumento: VALID_CARNET_URL, estadoCarnet: "verificado", estado: "Aprobado" },
+      { id: "j2", nombre: "David Díaz", fotoDocumento: null, estadoCarnet: "pendiente", estado: "Pendiente" },
+      { id: "j3", nombre: "Andrés Valle", fotoDocumento: null, estadoCarnet: "pendiente", estado: "Pendiente" },
+      { id: "j4", nombre: "José Rodas", fotoDocumento: null, estadoCarnet: "pendiente", estado: "Pendiente" }
     ];
 
-    // Simulación del setter atómico de React en page.jsx:
-    // setJugadores(prev => prev.map(j => j.id === id ? { ...j, fotoDocumento: url, estado: "Aprobado" } : j))
+    // Simulación del setter atómico de React en /admin:
     const atomicUpload = (id, fotoData) => {
       jugadoresEnEstado = jugadoresEnEstado.map(j =>
-        j.id === id ? { ...j, fotoDocumento: fotoData, estado: "Aprobado" } : j
+        j.id === id ? { ...j, fotoDocumento: fotoData, estadoCarnet: "verificado", estado: "Aprobado" } : j
       );
     };
 
@@ -200,7 +195,7 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
     expect(jugadoresEnEstado[2].fotoDocumento).toBe("data:image/jpeg;base64,carnetAndresValle");
     expect(jugadoresEnEstado[3].fotoDocumento).toBe("data:image/jpeg;base64,carnetJoseRodas");
 
-    // Todos deben ser reconocidos como habilitados
+    // Todos deben ser reconocidos como habilitados tras verificación administrativa
     expect(jugadoresEnEstado.every(esJugadorHabilitado)).toBe(true);
   });
 
@@ -221,7 +216,7 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
         telefono: "94744365",
         dni: "0501-1999-55555",
         tipoDocumento: "carnet",
-        fotoDocumento: "carnetCap",
+        fotoDocumento: VALID_CARNET_URL,
         carrera: "Mecatrónica"
       },
       jugadores: [
@@ -231,7 +226,7 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
           correo: `titan${i + 2}@unitec.edu`,
           dni: `0501-2000-5555${i + 2}`,
           tipoDocumento: "carnet",
-          fotoDocumento: "carnetOk",
+          fotoDocumento: VALID_CARNET_URL,
           carrera: "Mecatrónica"
         })),
         {
@@ -247,11 +242,14 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
     };
 
     const reg = await inscribirEquipo(payload);
+    verificarOtp("carlos.rubi@unitec.edu", "123456");
+    await verificarCarnetsEquipoAdmin(reg.equipoId);
+
     let admin = await obtenerDatosAdmin();
     let eq = admin.equipos.find(e => e.codigoAcceso === reg.codigoAcceso);
     eq.estado = "Confirmado"; // Supongamos pago validado
 
-    // Verificación 1: Equipo NO es apto (7 con carnet, 1 pendiente)
+    // Verificación 1: Equipo NO es apto (7 con carnet verificado, 1 pendiente)
     expect(esEquipoAptoParaLlaves(eq, admin.jugadores)).toBe(false);
 
     // Acción Administrativa: Admin sube carnet para el 8vo jugador
@@ -259,10 +257,10 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
     expect(jPendiente).toBeTruthy();
     await actualizarDocumentoJugador({
       jugadorId: jPendiente.id,
-      fotoDocumento: "data:image/jpeg;base64,carnetSubidoAdmin"
+      fotoDocumento: "data:image/jpeg;base64,carnetSubidoAdmin12345"
     });
 
-    // Verificación 2: El jugador pasa a Aprobado y el equipo ahora es APTO
+    // Verificación 2: El jugador pasa a Aprobado/verificado y el equipo ahora es APTO
     admin = await obtenerDatosAdmin();
     const jActualizado = admin.jugadores.find(j => j.id === jPendiente.id);
     expect(jActualizado.estado).toBe("Aprobado");
@@ -274,7 +272,7 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
   // =========================================================================
   // Escenario 4: Docente autorizado registrado en plantilla: validación de exención y cupo válido
   // =========================================================================
-  it('Escenario 4: Docente autorizado cuenta para el cupo mínimo de 8 sin requerir carnet estudiantil', async () => {
+  it('Escenario 4: Docente autorizado verificado cuenta para el cupo mínimo de 8 sin requerir carnet estudiantil', async () => {
     const payload = {
       equipo: {
         nombre: "Facultad FC",
@@ -288,7 +286,7 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
         telefono: "94744365",
         dni: "0501-1999-66666",
         tipoDocumento: "carnet",
-        fotoDocumento: "carnet",
+        fotoDocumento: VALID_CARNET_URL,
         carrera: "Mecatrónica"
       },
       jugadores: [
@@ -298,7 +296,7 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
           correo: `est${i + 2}@unitec.edu`,
           dni: `0501-2000-6666${i + 2}`,
           tipoDocumento: "carnet",
-          fotoDocumento: "carnet",
+          fotoDocumento: VALID_CARNET_URL,
           carrera: "Mecatrónica"
         })),
         {
@@ -313,16 +311,25 @@ describe('Tier 4: Real-World Tournament Lifecycle Workloads (8 Scenarios)', () =
     };
 
     const reg = await inscribirEquipo(payload);
-    const admin = await obtenerDatosAdmin();
-    const eq = admin.equipos.find(e => e.codigoAcceso === reg.codigoAcceso);
-    eq.estado = "Confirmado";
+    verificarOtp("carlos.rubi@unitec.edu", "123456");
+    await verificarCarnetsEquipoAdmin(reg.equipoId);
 
-    const jDocente = admin.jugadores.find(j => j.correo === "juan.mejia@unitec.edu.hn");
+    let admin = await obtenerDatosAdmin();
+    let jDocente = admin.jugadores.find(j => j.correo === "juan.mejia@unitec.edu.hn");
     expect(jDocente).toBeTruthy();
     expect(jDocente.dni).toBe("Exento (Docente)");
+    // Al haber sido pre-registrado manualmente por un estudiante, requiere aprobación admin o login propio (F-13.4)
+    expect(esJugadorHabilitado(jDocente)).toBe(false);
+
+    await revisarCarnetJugadorAdmin({ jugadorId: jDocente.id, decision: "verificado" });
+
+    admin = await obtenerDatosAdmin();
+    const eq = admin.equipos.find(e => e.codigoAcceso === reg.codigoAcceso);
+    eq.estado = "Confirmado";
+    jDocente = admin.jugadores.find(j => j.correo === "juan.mejia@unitec.edu.hn");
     expect(esJugadorHabilitado(jDocente)).toBe(true);
 
-    // 7 estudiantes con carnet + 1 docente exento = 8 habilitados -> Equipo apto
+    // 7 estudiantes con carnet verificado + 1 docente exento verificado = 8 habilitados -> Equipo apto
     expect(esEquipoAptoParaLlaves(eq, admin.jugadores)).toBe(true);
   });
 

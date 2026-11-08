@@ -77,8 +77,11 @@ const {
   DOCENTES_AUTORIZADOS
 } = await import('../lib/torneoConfig.js');
 
+const { verificarOtp } = await import('../lib/authService.js');
+
 const {
   esJugadorHabilitado,
+  esEquipoAptoParaLlaves,
   actualizarDocumentoJugador,
   inscribirEquipo,
   obtenerDatosAdmin,
@@ -87,27 +90,14 @@ const {
   actualizarEnlaceWhatsapp
 } = await import('../lib/dbService.js');
 
-// Dynamically extract and verify esEquipoAptoParaLlaves from app/admin/page.jsx
+// Verify app/admin/page.jsx exports esEquipoAptoParaLlaves
 const adminCode = fs.readFileSync(path.join(projectRoot, 'app', 'admin', 'page.jsx'), 'utf8');
-const aptoFnMatch = adminCode.match(/export function esEquipoAptoParaLlaves[\s\S]*?^}/m);
-if (!aptoFnMatch) {
+if (!adminCode.includes('esEquipoAptoParaLlaves')) {
   throw new Error("CRITICAL: esEquipoAptoParaLlaves not found in app/admin/page.jsx");
 }
 
-// Evaluate function extracted directly from app/admin/page.jsx
-const esEquipoAptoParaLlaves = new Function(
-  'equipo',
-  'todosJugadores',
-  'esJugadorHabilitado',
-  'CONFIG_TORNEO',
-  `
-  ${aptoFnMatch[0].replace('export function esEquipoAptoParaLlaves', 'const fn = function')}
-  return fn(equipo, todosJugadores);
-  `
-);
-
 function callApto(equipo, todosJugadores) {
-  return esEquipoAptoParaLlaves(equipo, todosJugadores, esJugadorHabilitado, CONFIG_TORNEO);
+  return esEquipoAptoParaLlaves(equipo, todosJugadores);
 }
 
 // Test Runner Infrastructure
@@ -342,7 +332,8 @@ test('2.1 Case A: 8 verified student players with carnet + payment approved -> E
     equipoId: "eq-a",
     nombre: `Estudiante ${i + 1}`,
     correo: `estudiante${i + 1}@unitec.edu`,
-    fotoDocumento: "data:image/jpeg;base64,/9j/carnet"
+    fotoDocumento: "data:image/jpeg;base64,/9j/carnet_verif",
+    estadoCarnet: "verificado"
   }));
 
   const eligible = callApto(eq, players);
@@ -357,7 +348,8 @@ test('2.2 Case B: 7 verified students + 1 faculty member without carnet (Juan Me
       equipoId: "eq-b",
       nombre: `Estudiante ${i + 1}`,
       correo: `estudiante${i + 1}@unitec.edu`,
-      fotoDocumento: "data:image/jpeg;base64,/9j/carnet"
+      fotoDocumento: "data:image/jpeg;base64,/9j/carnet_verif",
+      estadoCarnet: "verificado"
     })),
     {
       id: "j-b-docente",
@@ -383,7 +375,8 @@ test('2.3 Case B2: 7 verified students + 1 faculty member without carnet (Cristh
       equipoId: "eq-b2",
       nombre: `Estudiante ${i + 1}`,
       correo: `estudiante${i + 1}@unitec.edu`,
-      fotoDocumento: "data:image/jpeg;base64,/9j/carnet"
+      fotoDocumento: "data:image/jpeg;base64,/9j/carnet_verif",
+      estadoCarnet: "verificado"
     })),
     {
       id: "j-b2-docente",
@@ -407,7 +400,8 @@ test('2.4 Case C: 7 verified students + 1 student without carnet + paid -> Ineli
       equipoId: "eq-c",
       nombre: `Estudiante ${i + 1}`,
       correo: `estudiante${i + 1}@unitec.edu`,
-      fotoDocumento: "data:image/jpeg;base64,/9j/carnet"
+      fotoDocumento: "data:image/jpeg;base64,/9j/carnet_verif",
+      estadoCarnet: "verificado"
     })),
     {
       id: "j-c-8",
@@ -430,7 +424,8 @@ test('2.5 Case D: 8 verified students + unpaid (pagoConfirmado: false, estado: P
     equipoId: "eq-d",
     nombre: `Estudiante ${i + 1}`,
     correo: `estudiante${i + 1}@unitec.edu`,
-    fotoDocumento: "data:image/jpeg;base64,/9j/carnet"
+    fotoDocumento: "data:image/jpeg;base64,/9j/carnet_verif",
+    estadoCarnet: "verificado"
   }));
 
   const eligible = callApto(eq, players);
@@ -443,7 +438,8 @@ test('2.6 Payment synonyms: estado case-insensitivity ("aprobado", "PAGADO", "Co
     equipoId: "eq-syn",
     nombre: `Estudiante ${i + 1}`,
     correo: `estudiante${i + 1}@unitec.edu`,
-    fotoDocumento: "data:carnet"
+    fotoDocumento: "data:image/jpeg;base64,/9j/carnet_verif",
+    estadoCarnet: "verificado"
   }));
 
   const states = ["confirmado", "CONFIRMADO", "Confirmado", "pagado", "PAGADO", "aprobado", "APROBADO"];
@@ -472,24 +468,25 @@ test('2.8 Cross-team isolation: players from another team do not bleed into curr
   const eqTarget = { id: "target-team", estado: "Confirmado" };
   const allPlayers = [
     // 4 for target team
-    ...Array.from({ length: 4 }, (_, i) => ({ id: `t-${i}`, equipoId: "target-team", fotoDocumento: "carnet" })),
+    ...Array.from({ length: 4 }, (_, i) => ({ id: `t-${i}`, equipoId: "target-team", fotoDocumento: "data:image/jpeg;base64,carnet_verif", estadoCarnet: "verificado" })),
     // 10 for foreign team
-    ...Array.from({ length: 10 }, (_, i) => ({ id: `f-${i}`, equipoId: "foreign-team", fotoDocumento: "carnet" }))
+    ...Array.from({ length: 10 }, (_, i) => ({ id: `f-${i}`, equipoId: "foreign-team", fotoDocumento: "data:image/jpeg;base64,carnet_verif", estadoCarnet: "verificado" }))
   ];
 
   assert.equal(callApto(eqTarget, allPlayers), false, "Target team only has 4 players and must be ineligible");
 });
 
-test('2.9 Supabase snake_case support: foto_documento is treated as verified carnet', () => {
+test('2.9 Supabase snake_case support: foto_documento + estado_carnet verificado is treated as verified carnet', () => {
   const eq = { id: "eq-snake", estado: "Confirmado" };
   const players = Array.from({ length: 8 }, (_, i) => ({
     id: `j-s-${i}`,
     equipoId: "eq-snake",
     correo: `s${i}@unitec.edu`,
-    foto_documento: "data:image/png;base64,supabaseDataUrl" // snake_case from DB
+    foto_documento: "data:image/png;base64,supabaseDataUrl", // snake_case from DB
+    estado_carnet: "verificado"
   }));
 
-  assert.equal(callApto(eq, players), true, "foto_documento must be recognized as verified carnet");
+  assert.equal(callApto(eq, players), true, "foto_documento + estado_carnet must be recognized as verified carnet");
 });
 
 // ======================================================================
@@ -497,7 +494,7 @@ test('2.9 Supabase snake_case support: foto_documento is treated as verified car
 // ======================================================================
 console.log('● Suite 3: Carnet Update & State Consistency');
 
-await testAsync('3.1 actualizarDocumentoJugador persists carnet and sets estado to Aprobado', async () => {
+await testAsync('3.1 actualizarDocumentoJugador by Admin persists carnet and sets estado to Aprobado (verificado)', async () => {
   reiniciarBaseDeDatosSimulada();
 
   const teamData = {
@@ -509,7 +506,7 @@ await testAsync('3.1 actualizarDocumentoJugador persists carnet and sets estado 
       telefono: "+504 9474-4365",
       dni: "0501-1999-12345",
       tipoDocumento: "carnet",
-      fotoDocumento: "data:image/jpeg;base64,capitanFoto"
+      fotoDocumento: "data:image/jpeg;base64,capitanFotoValida2026"
     },
     jugadores: [{
       nombre: "Jugador Sin Carnet",
@@ -521,6 +518,8 @@ await testAsync('3.1 actualizarDocumentoJugador persists carnet and sets estado 
   };
 
   await inscribirEquipo(teamData);
+  verificarOtp('carlos.rubi@unitec.edu', '123456');
+
   let admin = await obtenerDatosAdmin();
   let target = admin.jugadores.find(j => j.cuenta === "22102222");
   assert.ok(target, "Player must exist");
@@ -543,7 +542,7 @@ await testAsync('3.1 actualizarDocumentoJugador persists carnet and sets estado 
 });
 
 test('3.2 Atomic State Mutation: Concurrent updates to multiple players preserve all updates without clobbering', () => {
-  // Simulates React's functional updater in app/admin/page.jsx:262-273
+  // Simulates React's functional updater in app/admin/page.jsx
   let state = Array.from({ length: 10 }, (_, i) => ({
     id: `p-${i}`,
     nombre: `Player ${i}`,
@@ -564,6 +563,7 @@ test('3.2 Atomic State Mutation: Concurrent updates to multiple players preserve
               ...j,
               fotoDocumento: dataUrl,
               foto_documento: dataUrl,
+              estadoCarnet: "verificado",
               estado: "Aprobado"
             }
           : j
@@ -581,20 +581,25 @@ test('3.2 Atomic State Mutation: Concurrent updates to multiple players preserve
   assert.equal(state.find(j => j.id === "p-0").fotoDocumento, null);
 });
 
-test('3.3 Dynamic Eligibility Transition: Uploading 8th carnet immediately transforms team from Ineligible to Eligible', () => {
+test('3.3 Dynamic Eligibility Transition: Verifying 8th carnet immediately transforms team from Ineligible to Eligible', () => {
   const eq = { id: "eq-trans", estado: "Confirmado", pagoConfirmado: true };
   let players = Array.from({ length: 8 }, (_, i) => ({
     id: `j-trans-${i}`,
     equipoId: "eq-trans",
     correo: `trans${i}@unitec.edu`,
-    fotoDocumento: i < 7 ? "data:carnet" : null
+    fotoDocumento: i < 7 ? "data:image/jpeg;base64,carnet_verif" : null,
+    estadoCarnet: i < 7 ? "verificado" : "pendiente"
   }));
 
   // Step 1: 7 carnets -> Not eligible
   assert.equal(callApto(eq, players), false, "With 7 carnets, team is not eligible");
 
-  // Step 2: Upload 8th carnet (atomic functional update)
-  players = players.map(j => j.id === "j-trans-7" ? { ...j, fotoDocumento: "data:carnet-8" } : j);
+  // Step 2: Upload & verify 8th carnet (atomic functional update)
+  players = players.map(j =>
+    j.id === "j-trans-7"
+      ? { ...j, fotoDocumento: "data:image/jpeg;base64,carnet-8-verif", estadoCarnet: "verificado" }
+      : j
+  );
 
   // Step 3: Now 8 carnets -> Eligible!
   assert.equal(callApto(eq, players), true, "With 8 carnets, team transitions immediately to eligible");

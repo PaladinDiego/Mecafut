@@ -1,72 +1,14 @@
 rules_version = '2';
 
+// NOTA ARQUITECTÓNICA (MECAFUT Q4 2026):
+// Firebase Firestore fue deprecado y retirado del código fuente activo.
+// La persistencia oficial y control de acceso operan en Supabase PostgreSQL
+// mediante políticas RLS cerradas y funciones transaccionales SECURITY DEFINER
+// (ver supabase/migrations/). Este archivo bloquea cualquier acceso accidental.
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper: Validar si la petición proviene de un administrador de MECAFUT
-    function esAdmin() {
-      return request.auth != null && 
-        (request.auth.token.email in [
-          "andresvalle@unitec.edu",
-          "carlos.rubi@unitec.edu",
-          "juan.mejia@unitec.edu.hn",
-          "cristhyan.rivera@unitec.edu.hn",
-          "joserodasgodoy@unitec.edu",
-          "c.marcelo.al@unitec.edu",
-          "cesar_lopez@unitec.edu",
-          "adioyuela@unitec.edu",
-          "maria_giron@unitec.edu",
-          "dereck.beltrand@unitec.edu",
-          "jalfaro@unitec.edu"
-        ]);
-    }
-
-    // Colección: Equipos
-    match /equipos/{equipoId} {
-      // Lectura pública de equipos y cupos
-      allow read: if true;
-      
-      // Creación durante inscripciones con validación de campos mínimos requeridos
-      allow create: if request.resource.data.nombre is string
-                    && request.resource.data.nombre.size() >= 3
-                    && request.resource.data.categoria in ['Masculino', 'Femenino']
-                    && request.resource.data.codigoAcceso is string
-                    && request.resource.data.codigoAcceso.size() == 8
-                    && request.resource.data.estado in ['Pendiente', 'Confirmado'];
-
-      // Actualización de comprobante o administradores
-      allow update: if esAdmin() || 
-                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comprobanteDataUrl', 'comprobanteAdjunto']));
-
-      // Prohibir borrado accidental o sabotaje desde clientes anónimos
-      allow delete: if esAdmin();
-    }
-
-    // Colección: Jugadores
-    match /jugadores/{jugadorId} {
-      // Lectura pública para padrón de jugadores y cuadro del torneo
-      allow read: if true;
-
-      // Creación al registrar equipo o unirse con código
-      allow create: if request.resource.data.nombre is string
-                    && request.resource.data.cuenta is string
-                    && request.resource.data.equipoId is string;
-
-      // Actualización restringida a datos de carnet y DNI
-      allow update: if esAdmin() || 
-                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fotoDocumento', 'tipoDocumento', 'dni']));
-
-      // Borrado permitido al capitán o al administrador
-      allow delete: if esAdmin();
-    }
-
-    // Colección: Configuración y Torneo en Vivo
-    match /configuracion/{docId} {
-      // Lectura pública para consultar fechas, estado de inscripciones y marcadores
-      allow read: if true;
-
-      // Escritura restringida al Comité Organizador
-      allow write: if esAdmin();
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

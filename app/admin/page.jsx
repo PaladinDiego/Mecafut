@@ -5,7 +5,6 @@ import {
   actualizarEstadoEquipo,
   eliminarEquipoAdmin,
   cambiarEstadoInscripciones,
-  reiniciarBaseDeDatosSimulada,
   guardarBracketCategoria,
   guardarTorneoCompleto,
   actualizarConfigVisibilidadTorneo,
@@ -13,19 +12,43 @@ import {
   eliminarCriterioPremio,
   ajustarConteoCriterio,
   actualizarDocumentoJugador,
+  revisarCarnetJugadorAdmin,
   comprimirDocumento,
   actualizarEnlaceWhatsapp,
-  esJugadorHabilitado
+  guardarConfiguracionGeneral,
+  esJugadorHabilitado,
+  obtenerEstadoCarnet,
+  isSupabaseConfigured
 } from "../../lib/dbService";
 import { exportarExcelOficial, exportarPDFPlanillas } from "../../lib/exportUtils";
+import { notifyUser } from "../../lib/uiFeedback";
 import { CONFIG_TORNEO, esDocenteAutorizado } from "../../lib/torneoConfig";
-import { obtenerSesionActual, verificarOtp } from "../../lib/authService";
+import { ClipboardList, GitBranch, Radio, Settings, Shield, Users } from "lucide-react";
+import {
+  obtenerSesionActual,
+  verificarOtp,
+  verificarSesionServidor,
+  generarPasswordTemporalAdmin
+} from "../../lib/authService";
 import {
   generarBracketEliminacion,
   generarTriangularFemenino,
-  propagarGanadorEliminacion
+  generarSerieDosEquiposFemenino,
+  propagarGanadorEliminacion,
+  actualizarPartidoTriangular,
+  actualizarPartidoSerieDos,
+  validarBracketCompleto
 } from "../../lib/bracketUtils";
 import BracketTorneo from "../../components/BracketTorneo";
+
+const ADMIN_SECTIONS = [
+  { key: "equipos", label: "Equipos y pagos", icon: Users },
+  { key: "jugadores", label: "Padrón de jugadores", icon: ClipboardList },
+  { key: "llaves", label: "Llaves y sorteo", icon: GitBranch },
+  { key: "resultados", label: "Resultados en vivo", icon: Radio },
+  { key: "usuarios", label: "Usuarios y seguridad", icon: Shield },
+  { key: "configuracion", label: "Configuración", icon: Settings },
+];
 
 export function esEquipoAptoParaLlaves(equipo, todosJugadores = []) {
   if (!equipo) return false;
@@ -50,10 +73,28 @@ export default function Admin() {
   const [torneo, setTorneo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filtro, setFiltro] = useState("");
-  const [pestanaActiva, setPestanaActiva] = useState("equipos"); // "equipos" | "jugadores" | "llaves" | "resultados"
+  const [filtroEstadoCarnet, setFiltroEstadoCarnet] = useState("todos");
+  const [pestanaActiva, setPestanaActiva] = useState("equipos"); // "equipos" | "jugadores" | "llaves" | "resultados" | "usuarios" | "configuracion"
   const [vistaPadron, setVistaPadron] = useState("agrupado"); // "agrupado" | "lista"
   const [modo, setModo] = useState("simulado");
   const [visorModal, setVisorModal] = useState(null);
+  const [revisandoId, setRevisandoId] = useState(null);
+
+  // Estados para Usuarios y Seguridad
+  const [usuarios, setUsuarios] = useState([]);
+  const [historial, setHistorial] = useState([]);
+  const [modalTempPassword, setModalTempPassword] = useState(null);
+  const [generandoTempPassword, setGenerandoTempPassword] = useState(false);
+  const [modalHistorialUsuario, setModalHistorialUsuario] = useState(null);
+
+  // Estados para Configuración Operativa (Ocultos por defecto hasta que el comité decida publicarlos)
+  const [cfgMaxJugadores, setCfgMaxJugadores] = useState(15);
+  const [cfgFechaCierre, setCfgFechaCierre] = useState("");
+  const [cfgPublicarGoleadores, setCfgPublicarGoleadores] = useState(false);
+  const [cfgPublicarClasificacion, setCfgPublicarClasificacion] = useState(false);
+  const [cfgPublicarPremios, setCfgPublicarPremios] = useState(false);
+  const [guardandoConfig, setGuardandoConfig] = useState(false);
+  const [mensajeConfig, setMensajeConfig] = useState(null);
 
   // Estados para sorteo y llaves
   const [categoriaSorteo, setCategoriaSorteo] = useState("Masculino");
@@ -105,18 +146,36 @@ export default function Admin() {
   const [manualFem, setManualFem] = useState({
     eq1: "",
     eq2: "",
-    eq3: ""
+    eq3: "",
+    eq4: ""
   });
 
   const [sesionActual, setSesionActual] = useState(null);
 
   useEffect(() => {
-    const s = obtenerSesionActual();
-    setSesionActual(s);
-    if (s && s.rol === "admin") {
-      setIsLogged(true);
-      fetchData();
-    }
+    let cancelado = false;
+    const validarAccesoAdmin = async () => {
+      const sLocal = obtenerSesionActual();
+      setSesionActual(sLocal);
+      if (!sLocal || sLocal.rol !== "admin") {
+        setIsLogged(false);
+        return;
+      }
+      const sValida = await verificarSesionServidor();
+      if (cancelado) return;
+      if (sValida && sValida.rol === "admin") {
+        setSesionActual(sValida);
+        setIsLogged(true);
+        fetchData();
+      } else {
+        setSesionActual(obtenerSesionActual());
+        setIsLogged(false);
+      }
+    };
+    validarAccesoAdmin();
+    return () => {
+      cancelado = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -131,15 +190,22 @@ export default function Admin() {
       const data = await obtenerDatosAdmin();
       setJugadores(data.jugadores || []);
       setEquipos(data.equipos || []);
+      setUsuarios(data.usuarios || []);
+      setHistorial(data.historial || []);
       const cfg = data.configuracion || { inscripcionesAbiertas: true };
       setConfiguracion(cfg);
+      setCfgMaxJugadores(cfg.maxJugadoresPorEquipo || 15);
+      setCfgFechaCierre(cfg.fechaCierreInscripciones ? cfg.fechaCierreInscripciones.slice(0, 10) : "");
+      setCfgPublicarGoleadores(Boolean(cfg.publicarGoleadores));
+      setCfgPublicarClasificacion(Boolean(cfg.publicarClasificacion));
+      setCfgPublicarPremios(Boolean(cfg.publicarPremios));
       if (cfg.whatsappCapitanesUrl) {
         setUrlWhatsappInput(cfg.whatsappCapitanesUrl);
       }
       setTorneo(data.torneo || null);
       setModo(data.modo);
     } catch (err) {
-      alert("Error al cargar datos del panel: " + err.message);
+      notifyUser("Error al cargar datos del panel: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -150,7 +216,7 @@ export default function Admin() {
       await actualizarEstadoEquipo(equipoId, nuevoEstado);
       fetchData();
     } catch (err) {
-      alert("Error al cambiar estado: " + err.message);
+      notifyUser("Error al cambiar estado: " + err.message);
     }
   };
 
@@ -160,7 +226,7 @@ export default function Admin() {
         await eliminarEquipoAdmin(equipoId);
         fetchData();
       } catch (err) {
-        alert("Error al eliminar equipo: " + err.message);
+        notifyUser("Error al eliminar equipo: " + err.message);
       }
     }
   };
@@ -171,14 +237,7 @@ export default function Admin() {
       await cambiarEstadoInscripciones(nuevoEstado);
       setConfiguracion({ ...configuracion, inscripcionesAbiertas: nuevoEstado });
     } catch (err) {
-      alert("Error actualizando estado de inscripciones: " + err.message);
-    }
-  };
-
-  const handleResetSimulado = () => {
-    if (confirm("¿Deseas reiniciar la base de datos simulada a los datos semilla iniciales? Se borrarán pruebas creadas localmente.")) {
-      reiniciarBaseDeDatosSimulada();
-      fetchData();
+      notifyUser("Error actualizando estado de inscripciones: " + err.message);
     }
   };
 
@@ -189,7 +248,7 @@ export default function Admin() {
     if (e) e.preventDefault();
     const urlLimpia = (urlWhatsappInput || "").trim();
     if (!urlLimpia.startsWith("https://")) {
-      alert("El enlace debe ser seguro y comenzar con https:// (ej. https://chat.whatsapp.com/...)");
+      notifyUser("El enlace debe ser seguro y comenzar con https:// (ej. https://chat.whatsapp.com/...)");
       return;
     }
 
@@ -201,7 +260,7 @@ export default function Admin() {
       setMensajeWhatsapp({ tipo: "exito", texto: "¡Enlace de WhatsApp actualizado con éxito!" });
       setTimeout(() => setMensajeWhatsapp(null), 4000);
     } catch (err) {
-      alert("Error al guardar enlace de WhatsApp: " + err.message);
+      notifyUser("Error al guardar enlace de WhatsApp: " + err.message);
     } finally {
       setGuardandoWhatsapp(false);
     }
@@ -210,7 +269,7 @@ export default function Admin() {
   const handleProbarWhatsapp = () => {
     const url = (urlWhatsappInput || "").trim();
     if (!url.startsWith("https://")) {
-      alert("Ingresa un enlace válido que comience con https:// para probarlo.");
+      notifyUser("Ingresa un enlace válido que comience con https:// para probarlo.");
       return;
     }
     window.open(url, "_blank");
@@ -247,7 +306,7 @@ export default function Admin() {
   const handleGuardarCarnet = async (e) => {
     e.preventDefault();
     if (!modalCarnetJugador || !carnetDataUrl) {
-      alert("Por favor selecciona una foto de carnet o matrícula.");
+      notifyUser("Por favor selecciona una foto de carnet o matrícula.");
       return;
     }
     setSubiendoCarnet(true);
@@ -272,13 +331,108 @@ export default function Admin() {
         )
       );
       setEquipos((prev) => [...prev]);
-      alert(`¡Carnet de ${modalCarnetJugador.nombre} actualizado y verificado con éxito!`);
+      notifyUser(`¡Carnet de ${modalCarnetJugador.nombre} actualizado y verificado con éxito!`);
       setModalCarnetJugador(null);
       setCarnetDataUrl(null);
     } catch (err) {
-      alert("Error guardando carnet: " + err.message);
+      notifyUser("Error guardando carnet: " + err.message);
     } finally {
       setSubiendoCarnet(false);
+    }
+  };
+
+  // ========================================================
+  // REVISIÓN INDIVIDUAL DE CARNETS (APROBAR / RECHAZAR CON MOTIVO)
+  // ========================================================
+  const handleRevisarCarnet = async (jugador, decision) => {
+    let motivo = "";
+    if (decision === "rechazado") {
+      motivo = prompt(
+        "Ingresa el motivo del rechazo del carnet (visible para el jugador y capitán):",
+        "La foto es ilegible o no coincide con los datos."
+      );
+      if (motivo === null) return;
+    }
+
+    setRevisandoId(jugador.id);
+    try {
+      await revisarCarnetJugadorAdmin({ jugadorId: jugador.id, decision, motivo });
+      setJugadores((prev) =>
+        prev.map((j) =>
+          j.id === jugador.id
+            ? {
+                ...j,
+                estadoCarnet: decision,
+                estado_carnet: decision,
+                estado: decision === "verificado" ? "Aprobado" : "Rechazado",
+                motivoRechazo: decision === "rechazado" ? motivo : null
+              }
+            : j
+        )
+      );
+      if (visorModal?.jugador?.id === jugador.id) {
+        setVisorModal(null);
+      }
+    } catch (err) {
+      notifyUser("Error al revisar carnet: " + err.message);
+    } finally {
+      setRevisandoId(null);
+    }
+  };
+
+  // ========================================================
+  // GESTIÓN DE USUARIOS Y CONTRASEÑAS TEMPORALES
+  // ========================================================
+  const handleGenerarPasswordTemporal = async (u) => {
+    if (
+      !confirm(
+        `¿Generar una contraseña temporal para "${u.nombre || u.correo}" (${u.correo})?\n\nLa sesión actual del usuario será revocada y se le exigirá cambiar la contraseña en su próximo inicio de sesión.`
+      )
+    ) {
+      return;
+    }
+    setGenerandoTempPassword(true);
+    try {
+      const res = await generarPasswordTemporalAdmin(u.id);
+      setModalTempPassword({
+        usuarioId: u.id,
+        nombre: u.nombre,
+        correo: u.correo,
+        tempPassword: res.tempPassword
+      });
+      fetchData();
+    } catch (err) {
+      notifyUser("Error al generar contraseña temporal: " + err.message);
+    } finally {
+      setGenerandoTempPassword(false);
+    }
+  };
+
+  // ========================================================
+  // CONFIGURACIÓN GENERAL Y VISIBILIDAD OPERATIVA
+  // ========================================================
+  const handleGuardarConfiguracionGeneral = async (e) => {
+    if (e) e.preventDefault();
+    setGuardandoConfig(true);
+    setMensajeConfig(null);
+    try {
+      const actualizadas = {
+        maxJugadoresPorEquipo: parseInt(cfgMaxJugadores, 10) || 15,
+        fechaCierreInscripciones: cfgFechaCierre || null,
+        publicarGoleadores: Boolean(cfgPublicarGoleadores),
+        publicarClasificacion: Boolean(cfgPublicarClasificacion),
+        publicarPremios: Boolean(cfgPublicarPremios),
+        whatsappCapitanesUrl: (urlWhatsappInput || "").trim()
+      };
+      await guardarConfiguracionGeneral(actualizadas);
+      setConfiguracion((prev) => ({ ...prev, ...actualizadas }));
+      setMensajeConfig({ tipo: "exito", texto: "¡Configuración general guardada correctamente!" });
+      setTimeout(() => setMensajeConfig(null), 4000);
+      fetchData();
+    } catch (err) {
+      notifyUser("Error al guardar configuración: " + err.message);
+    } finally {
+      setGuardandoConfig(false);
     }
   };
 
@@ -293,26 +447,49 @@ export default function Admin() {
     const equiposAptos = equiposCategoria.filter((e) => esEquipoAptoParaLlaves(e, jugadores));
 
     if (equiposAptos.length < 2) {
-      alert(
+      notifyUser(
         `Se requieren al menos 2 equipos elegibles (pago confirmado y mínimo ${CONFIG_TORNEO.plantilla.min} carnets verificados) en la categoría ${categoria} para armar el torneo.`
       );
       return;
     }
 
     let nuevoBracket;
-    // Si es Femenino y son exactamente 3 equipos -> Reglamento Especial Triangular + Final
-    if (categoria === "Femenino" && equiposAptos.length === 3) {
-      nuevoBracket = generarTriangularFemenino(equiposAptos, aleatorio);
+    if (categoria === "Femenino") {
+      if (equiposAptos.length === 2) {
+        const opcion = prompt(
+          "Se detectaron 2 equipos femeninos elegibles.\nElige el formato oficial para la serie final:\n\n1 = Gran Final a Partido Único\n2 = Serie a 2 Partidos (Ida y Vuelta con desempate por penales)\n3 = Serie al Mejor de 3 Partidos (gana quien logre 2 victorias)\n\nIngresa 1, 2 o 3 [por defecto 1]:",
+          "1"
+        );
+        let formato2 = "final_unica";
+        if (opcion === "2") formato2 = "ida_vuelta";
+        if (opcion === "3") formato2 = "mejor_de_tres";
+        nuevoBracket = generarSerieDosEquiposFemenino(equiposAptos, { formato: formato2, aleatorio });
+      } else if (equiposAptos.length === 3) {
+        nuevoBracket = generarTriangularFemenino(equiposAptos, aleatorio);
+      } else if (equiposAptos.length === 4) {
+        nuevoBracket = generarBracketEliminacion(equiposAptos, aleatorio);
+      } else {
+        notifyUser(
+          "Decisión Reglamentaria Requerida del Comité: Hay 5 o más equipos femeninos registrados (el cupo reglamentario base es 4).\n\nLa generación automática ha sido detenida. Utiliza el Armado Manual de Llaves según la resolución oficial del Comité Organizador."
+        );
+        return;
+      }
     } else {
       nuevoBracket = generarBracketEliminacion(equiposAptos, aleatorio);
+    }
+
+    const val = validarBracketCompleto(nuevoBracket);
+    if (!val.valido) {
+      notifyUser("Error en la validación reglamentaria de llaves:\n" + val.errores.join("\n"));
+      return;
     }
 
     try {
       const actualizado = await guardarBracketCategoria(categoria, nuevoBracket);
       setTorneo(actualizado);
-      alert(`¡Cruces generados con éxito para la categoría ${categoria}!`);
+      notifyUser(`¡Cruces generados con éxito para la categoría ${categoria}!`);
     } catch (err) {
-      alert("Error guardando cruces: " + err.message);
+      notifyUser("Error guardando cruces: " + err.message);
     }
   };
 
@@ -328,7 +505,7 @@ export default function Admin() {
         (e) => (e.categoria || "Masculino") === "Masculino" && esEquipoAptoParaLlaves(e, jugadores)
       );
       if (aptos.length < 1) {
-        alert("No hay equipos masculinos elegibles registrados.");
+        notifyUser("No hay equipos masculinos elegibles registrados.");
         return;
       }
       setManualMasc({
@@ -350,13 +527,14 @@ export default function Admin() {
         (e) => e.categoria === "Femenino" && esEquipoAptoParaLlaves(e, jugadores)
       );
       if (aptos.length < 1) {
-        alert("No hay equipos femeninos elegibles registrados.");
+        notifyUser("No hay equipos femeninos elegibles registrados.");
         return;
       }
       setManualFem({
         eq1: aptos[0]?.id || "",
         eq2: aptos[1]?.id || "",
-        eq3: aptos[2]?.id || ""
+        eq3: aptos[2]?.id || "",
+        eq4: aptos[3]?.id || ""
       });
     }
   };
@@ -367,19 +545,19 @@ export default function Admin() {
     const ids = keys.map((k) => manualMasc[k]);
 
     if (ids.some((id) => !id)) {
-      alert("Debes seleccionar los 12 equipos para los pases directos y los 4 partidos preliminares.");
+      notifyUser("Debes seleccionar los 12 equipos para los pases directos y los 4 partidos preliminares.");
       return;
     }
 
     const setIds = new Set(ids);
     if (setIds.size !== 12) {
-      alert("Error de validación: Hay equipos repetidos en la selección. Cada uno de los 12 equipos debe ser único.");
+      notifyUser("Error de validación: Hay equipos repetidos en la selección. Cada uno de los 12 equipos debe ser único.");
       return;
     }
 
     const orderedTeams = ids.map((id) => equipos.find((eq) => eq.id === id)).filter(Boolean);
     if (orderedTeams.length !== 12) {
-      alert("Error al cargar los datos de los equipos seleccionados.");
+      notifyUser("Error al cargar los datos de los equipos seleccionados.");
       return;
     }
 
@@ -388,41 +566,54 @@ export default function Admin() {
       const actualizado = await guardarBracketCategoria("Masculino", bracket);
       setTorneo(actualizado);
       setModalArmadoManual(false);
-      alert("¡Llave Masculina armada y publicada con éxito!");
+      notifyUser("¡Llave Masculina armada y publicada con éxito!");
     } catch (err) {
-      alert("Error guardando llave masculina: " + err.message);
+      notifyUser("Error guardando llave masculina: " + err.message);
     }
   };
 
   const handleGuardarManualFemenino = async (e) => {
     e.preventDefault();
-    const ids = [manualFem.eq1, manualFem.eq2, manualFem.eq3];
+    const aptosFem = equipos.filter(
+      (e) => e.categoria === "Femenino" && esEquipoAptoParaLlaves(e, jugadores)
+    );
+    const requeridos = aptosFem.length >= 4 ? 4 : (aptosFem.length === 2 ? 2 : 3);
+    const ids = requeridos === 4
+      ? [manualFem.eq1, manualFem.eq2, manualFem.eq3, manualFem.eq4]
+      : (requeridos === 2 ? [manualFem.eq1, manualFem.eq2] : [manualFem.eq1, manualFem.eq2, manualFem.eq3]);
 
     if (ids.some((id) => !id)) {
-      alert("Debes seleccionar los 3 equipos para el Triangular Femenino.");
+      notifyUser(`Debes seleccionar los ${requeridos} equipos para el torneo femenino.`);
       return;
     }
 
     const setIds = new Set(ids);
-    if (setIds.size !== 3) {
-      alert("Error de validación: Hay equipos repetidos en la selección. Los 3 equipos del Triangular deben ser únicos.");
+    if (setIds.size !== requeridos) {
+      notifyUser(`Error de validación: Hay equipos repetidos en la selección. Los ${requeridos} equipos deben ser únicos.`);
       return;
     }
 
     const orderedTeams = ids.map((id) => equipos.find((eq) => eq.id === id)).filter(Boolean);
-    if (orderedTeams.length !== 3) {
-      alert("Error al cargar los datos de los equipos femeninos seleccionados.");
+    if (orderedTeams.length !== requeridos) {
+      notifyUser("Error al cargar los datos de los equipos femeninos seleccionados.");
       return;
     }
 
     try {
-      const bracket = generarTriangularFemenino(orderedTeams, false);
+      let bracket;
+      if (requeridos === 2) {
+        bracket = generarSerieDosEquiposFemenino(orderedTeams, "final_unica", false);
+      } else if (requeridos === 4) {
+        bracket = generarBracketEliminacion(orderedTeams, false);
+      } else {
+        bracket = generarTriangularFemenino(orderedTeams, false);
+      }
       const actualizado = await guardarBracketCategoria("Femenino", bracket);
       setTorneo(actualizado);
       setModalArmadoManual(false);
-      alert("¡Triangular Femenino armado y publicado con éxito!");
+      notifyUser("¡Llave Femenina armada y publicada con éxito!");
     } catch (err) {
-      alert("Error guardando triangular femenino: " + err.message);
+      notifyUser("Error guardando llave femenina: " + err.message);
     }
   };
 
@@ -471,13 +662,9 @@ export default function Admin() {
 
     let bracketNuevo;
     if (bracket.tipo === "triangular_final") {
-      bracketNuevo = JSON.parse(JSON.stringify(bracket));
-      const idxJ = bracketNuevo.jornadas.findIndex((p) => p.id === partido.id);
-      if (idxJ !== -1) {
-        bracketNuevo.jornadas[idxJ] = partidoActualizado;
-      } else if (bracketNuevo.granFinal?.id === partido.id) {
-        bracketNuevo.granFinal = partidoActualizado;
-      }
+      bracketNuevo = actualizarPartidoTriangular(bracket, partidoActualizado);
+    } else if (bracket.tipo === "serie_dos_equipos") {
+      bracketNuevo = actualizarPartidoSerieDos(bracket, partidoActualizado);
     } else {
       bracketNuevo = propagarGanadorEliminacion(bracket, partidoActualizado);
     }
@@ -487,7 +674,7 @@ export default function Admin() {
       setTorneo(torActualizado);
       setModalGolPartido(null);
     } catch (err) {
-      alert("Error registrando gol: " + err.message);
+      notifyUser("Error registrando gol: " + err.message);
     }
   };
 
@@ -525,13 +712,9 @@ export default function Admin() {
 
     let bracketNuevo;
     if (bracket.tipo === "triangular_final") {
-      bracketNuevo = JSON.parse(JSON.stringify(bracket));
-      const idxJ = bracketNuevo.jornadas.findIndex((p) => p.id === partido.id);
-      if (idxJ !== -1) {
-        bracketNuevo.jornadas[idxJ] = partidoActualizado;
-      } else if (bracketNuevo.granFinal?.id === partido.id) {
-        bracketNuevo.granFinal = partidoActualizado;
-      }
+      bracketNuevo = actualizarPartidoTriangular(bracket, partidoActualizado);
+    } else if (bracket.tipo === "serie_dos_equipos") {
+      bracketNuevo = actualizarPartidoSerieDos(bracket, partidoActualizado);
     } else {
       bracketNuevo = propagarGanadorEliminacion(bracket, partidoActualizado);
     }
@@ -541,7 +724,7 @@ export default function Admin() {
       setTorneo(torActualizado);
       setModalEstadoPartido(null);
     } catch (err) {
-      alert("Error actualizando partido: " + err.message);
+      notifyUser("Error actualizando partido: " + err.message);
     }
   };
 
@@ -558,7 +741,7 @@ export default function Admin() {
       setTorneo(act);
       setNuevoCriterioNombre("");
     } catch (err) {
-      alert("Error creando criterio: " + err.message);
+      notifyUser("Error creando criterio: " + err.message);
     }
   };
 
@@ -568,7 +751,7 @@ export default function Admin() {
         const act = await eliminarCriterioPremio(critId);
         setTorneo(act);
       } catch (err) {
-        alert("Error eliminando criterio: " + err.message);
+        notifyUser("Error eliminando criterio: " + err.message);
       }
     }
   };
@@ -578,7 +761,16 @@ export default function Admin() {
       const act = await ajustarConteoCriterio({ criterioId: critId, jugador, delta });
       setTorneo(act);
     } catch (err) {
-      alert("Error ajustando puntaje: " + err.message);
+      notifyUser("Error ajustando puntaje: " + err.message);
+    }
+  };
+
+  const handleActualizarVisibilidadTorneo = async (cambios) => {
+    try {
+      const act = await actualizarConfigVisibilidadTorneo(cambios);
+      setTorneo(act);
+    } catch (err) {
+      notifyUser("Error actualizando visibilidad del torneo: " + err.message);
     }
   };
 
@@ -628,21 +820,6 @@ export default function Admin() {
             )}
           </div>
 
-          {process.env.NODE_ENV !== "production" && (
-            <button
-              type="button"
-              onClick={() => {
-                verificarOtp("carlos.rubi@unitec.edu", "123456");
-                setIsLogged(true);
-                fetchData();
-              }}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow mb-3 flex items-center justify-center gap-2"
-            >
-              <span>⚡</span>
-              <span>Entrar como Admin (carlos.rubi@unitec.edu) [Modo Dev]</span>
-            </button>
-          )}
-
           <a
             href="/"
             className="block w-full border border-gray-300 hover:bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-xs transition text-center"
@@ -660,25 +837,158 @@ export default function Admin() {
       : torneo?.brackets?.Femenino;
 
   return (
-    <div className="max-w-6xl mx-auto p-4 sm:p-6 pb-20 space-y-6">
+    <div className="admin-page pb-20 space-y-6">
       {/* Modal universal para ver comprobantes / carnet */}
       {visorModal && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto text-center shadow-2xl">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto text-center shadow-2xl" role="dialog" aria-modal="true" aria-label="Vista previa del documento">
             <div className="flex justify-between items-center mb-4 border-b pb-2">
               <h3 className="font-bold text-blue-950 text-sm truncate text-left">{visorModal.titulo}</h3>
-              <button onClick={() => setVisorModal(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+              <button type="button" onClick={() => setVisorModal(null)} aria-label="Cerrar vista previa" className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
             </div>
+
+            {visorModal.jugador && (
+              <div className="mb-3 p-2.5 bg-gray-50 border rounded-xl text-left text-xs grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-gray-400 block text-[10px]">Cuenta Estudiantil</span>
+                  <strong className="font-mono text-gray-900">{visorModal.jugador.cuenta}</strong>
+                </div>
+                <div>
+                  <span className="text-gray-400 block text-[10px]">DNI Declarado</span>
+                  <strong className="font-mono text-gray-900">{visorModal.jugador.dni || "N/A"}</strong>
+                </div>
+              </div>
+            )}
+
             {visorModal.url ? (
-              <img src={visorModal.url} alt="Doc" className="max-h-[60vh] mx-auto rounded-xl border shadow" />
+              <img src={visorModal.url} alt="Doc" className="max-h-[55vh] mx-auto rounded-xl border shadow" />
             ) : (
               <p className="text-xs text-gray-400 py-8">Sin imagen adjunta.</p>
             )}
+
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {visorModal.jugador && (
+                <>
+                  <button
+                    type="button"
+                    disabled={revisandoId === visorModal.jugador.id}
+                    onClick={() => handleRevisarCarnet(visorModal.jugador, "verificado")}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow flex items-center gap-1"
+                  >
+                    <span>✅</span>
+                    <span>Aprobar Carnet</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={revisandoId === visorModal.jugador.id}
+                    onClick={() => handleRevisarCarnet(visorModal.jugador, "rechazado")}
+                    className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow flex items-center gap-1"
+                  >
+                    <span>❌</span>
+                    <span>Rechazar Documento</span>
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setVisorModal(null)}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold px-4 py-2 rounded-xl"
+              >
+                Cerrar Visor
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Contraseña Temporal Generada */}
+      {modalTempPassword && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-gray-100 text-center animate-fade-in space-y-4" role="dialog" aria-modal="true" aria-label="Contraseña temporal generada">
+            <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center text-2xl mx-auto">
+              🔑
+            </div>
+            <h3 className="text-xl font-black text-blue-950">Contraseña Temporal Generada</h3>
+            <p className="text-xs text-gray-500">
+              Entrega esta contraseña al usuario <strong>{modalTempPassword.nombre || modalTempPassword.correo}</strong> ({modalTempPassword.correo}). Se le obligará a crear una nueva contraseña personal en cuanto inicie sesión.
+            </p>
+
+            <div className="bg-gray-100 p-4 rounded-2xl border font-mono text-xl sm:text-2xl font-black text-blue-950 tracking-wider select-all">
+              {modalTempPassword.tempPassword}
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs text-amber-900">
+              ⚠️ <strong>Atención:</strong> Por motivos de seguridad, esta clave no se volverá a mostrar en pantalla. Cópiala y entrégala al destinatario ahora.
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(modalTempPassword.tempPassword);
+                  notifyUser("¡Contraseña copiada al portapapeles!");
+                }}
+                className="flex-1 bg-blue-950 hover:bg-blue-900 text-white font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow"
+              >
+                <span>📋</span>
+                <span>Copiar Contraseña</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalTempPassword(null)}
+                aria-label="Cerrar contraseña temporal"
+                className="px-5 border border-gray-300 hover:bg-gray-50 font-bold text-gray-700 py-2.5 rounded-xl text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Historial de Cambios de Identidad de Usuario */}
+      {modalHistorialUsuario && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 animate-fade-in space-y-4" role="dialog" aria-modal="true" aria-label="Historial de identidad de usuario">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="text-base font-black text-blue-950 flex items-center gap-2">
+                <span>⚠️</span>
+                <span>Historial de Identidad ({modalHistorialUsuario.correo})</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setModalHistorialUsuario(null)}
+                aria-label="Cerrar historial de identidad"
+                className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="max-h-80 overflow-y-auto space-y-2">
+              {modalHistorialUsuario.cambios.length === 0 ? (
+                <p className="text-xs text-gray-400 italic">No se registran cambios de identidad.</p>
+              ) : (
+                modalHistorialUsuario.cambios.map((c, idx) => (
+                  <div key={idx} className="p-3 bg-gray-50 rounded-xl border text-xs space-y-1">
+                    <div className="flex justify-between text-gray-500 text-[10px]">
+                      <span>Campo: <strong className="text-blue-900">{c.campo || c.columna}</strong></span>
+                      <span>{c.fecha ? new Date(c.fecha).toLocaleString("es-HN") : (c.creado_en ? new Date(c.creado_en).toLocaleString("es-HN") : "")}</span>
+                    </div>
+                    <div className="text-gray-700">
+                      <span className="line-through text-red-600 mr-2">{c.valorAnterior || c.valor_anterior || "(vacío)"}</span>
+                      <span>➔</span>
+                      <span className="text-emerald-700 font-bold ml-2">{c.valorNuevo || c.valor_nuevo}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
             <button
-              onClick={() => setVisorModal(null)}
-              className="mt-4 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold px-4 py-2 rounded-xl"
+              type="button"
+              onClick={() => setModalHistorialUsuario(null)}
+              className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-2 rounded-xl text-xs"
             >
-              Cerrar Visor
+              Cerrar
             </button>
           </div>
         </div>
@@ -687,7 +997,7 @@ export default function Admin() {
       {/* F10: Modal para Subir o Cambiar Carnet en el Padrón */}
       {modalCarnetJugador && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-blue-950 text-left animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-blue-950 text-left animate-fade-in" role="dialog" aria-modal="true" aria-label="Subir o cambiar carnet">
             <div className="flex justify-between items-center mb-3 border-b pb-2">
               <div>
                 <h3 className="text-base font-black text-blue-950">
@@ -705,6 +1015,7 @@ export default function Admin() {
                   setModalCarnetJugador(null);
                   setCarnetDataUrl(null);
                 }}
+                aria-label="Cerrar carga de carnet"
                 className="text-gray-400 hover:text-gray-700 font-bold text-lg"
               >
                 ✕
@@ -713,10 +1024,11 @@ export default function Admin() {
 
             <form onSubmit={handleGuardarCarnet} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">
+                <label htmlFor="admin-carnet-file" className="block text-xs font-bold text-gray-700 mb-1">
                   Foto del Carnet Estudiantil o Comprobante de Matrícula:
                 </label>
                 <input
+                  id="admin-carnet-file"
                   type="file"
                   accept="image/*,application/pdf"
                   onChange={handleArchivoCarnetChange}
@@ -775,7 +1087,7 @@ export default function Admin() {
       {/* F12: Modal Interactivo de Armado Manual de Llaves */}
       {modalArmadoManual && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border-2 border-blue-950 text-left animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border-2 border-blue-950 text-left animate-fade-in" role="dialog" aria-modal="true" aria-label="Armado manual de llaves del torneo">
             <div className="flex justify-between items-center mb-4 border-b pb-3">
               <div>
                 <h3 className="text-lg font-black text-blue-950 flex items-center gap-2">
@@ -788,6 +1100,7 @@ export default function Admin() {
               <button
                 type="button"
                 onClick={() => setModalArmadoManual(false)}
+                aria-label="Cerrar armado manual de llaves"
                 className="text-gray-400 hover:text-gray-700 font-bold text-lg"
               >
                 ✕
@@ -862,10 +1175,11 @@ export default function Admin() {
                             { key: "bye4", label: "Pase Directo 4 (BYE Slot 4)" }
                           ].map((slot) => (
                             <div key={slot.key}>
-                              <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                              <label htmlFor={`manual-slot-${slot.key}`} className="block text-[11px] font-bold text-gray-700 mb-1">
                                 {slot.label}:
                               </label>
                               <select
+                                id={`manual-slot-${slot.key}`}
                                 required
                                 value={manualMasc[slot.key]}
                                 onChange={(e) => setManualMasc({ ...manualMasc, [slot.key]: e.target.value })}
@@ -905,6 +1219,7 @@ export default function Admin() {
                               <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <select
                                   required
+                                  aria-label={`Equipo local, partido ${partido.num}`}
                                   value={manualMasc[partido.kA]}
                                   onChange={(e) => setManualMasc({ ...manualMasc, [partido.kA]: e.target.value })}
                                   className="w-full border border-gray-300 p-2 rounded-xl text-xs bg-white font-semibold"
@@ -919,6 +1234,7 @@ export default function Admin() {
 
                                 <select
                                   required
+                                  aria-label={`Equipo visitante, partido ${partido.num}`}
                                   value={manualMasc[partido.kB]}
                                   onChange={(e) => setManualMasc({ ...manualMasc, [partido.kB]: e.target.value })}
                                   className="w-full border border-gray-300 p-2 rounded-xl text-xs bg-white font-semibold"
@@ -979,42 +1295,58 @@ export default function Admin() {
                         </button>
                       </div>
 
-                      {aptosFem.length < 3 && (
+                      {aptosFem.length < 2 && (
                         <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-2xl text-xs">
-                          ⚠️ Hay <strong>{aptosFem.length}</strong> equipos femeninos elegibles (se requieren 3 para el Triangular).
+                          ⚠️ Hay <strong>{aptosFem.length}</strong> equipos femeninos elegibles (se requieren al menos 2 para armar llaves).
                           Puedes habilitar más equipos subiendo carnets o confirmando pagos.
                         </div>
                       )}
 
-                      <div className="bg-pink-50/70 p-4 rounded-2xl border border-pink-200 space-y-3">
-                        <h4 className="text-xs font-black text-pink-950 flex items-center gap-1.5">
-                          <span>🌸</span> Equipos del Triangular Todos contra Todos (3 Equipos)
-                        </h4>
-                        {[
+                      {(() => {
+                        const requeridos = aptosFem.length >= 4 ? 4 : (aptosFem.length === 2 ? 2 : 3);
+                        const slots = requeridos === 4 ? [
+                          { key: "eq1", label: "Semifinal 1 - Equipo A" },
+                          { key: "eq2", label: "Semifinal 1 - Equipo B" },
+                          { key: "eq3", label: "Semifinal 2 - Equipo A" },
+                          { key: "eq4", label: "Semifinal 2 - Equipo B" }
+                        ] : (requeridos === 2 ? [
+                          { key: "eq1", label: "Equipo 1 (Finalista A)" },
+                          { key: "eq2", label: "Equipo 2 (Finalista B)" }
+                        ] : [
                           { key: "eq1", label: "Equipo 1 (Jornada 1 vs Eq 2 / Jornada 3 vs Eq 3)" },
                           { key: "eq2", label: "Equipo 2 (Jornada 1 vs Eq 1 / Jornada 2 vs Eq 3)" },
                           { key: "eq3", label: "Equipo 3 (Jornada 2 vs Eq 2 / Jornada 3 vs Eq 1)" }
-                        ].map((slot) => (
-                          <div key={slot.key}>
-                            <label className="block text-[11px] font-bold text-gray-700 mb-1">
-                              {slot.label}:
-                            </label>
-                            <select
-                              required
-                              value={manualFem[slot.key]}
-                              onChange={(e) => setManualFem({ ...manualFem, [slot.key]: e.target.value })}
-                              className="w-full border border-gray-300 p-2.5 rounded-xl text-xs bg-white font-semibold"
-                            >
-                              <option value="">-- Seleccionar Equipo Femenino --</option>
-                              {aptosFem.map((eq) => (
-                                <option key={eq.id} value={eq.id}>
-                                  {eq.nombre}
-                                </option>
-                              ))}
-                            </select>
+                        ]);
+
+                        return (
+                          <div className="bg-pink-50/70 p-4 rounded-2xl border border-pink-200 space-y-3">
+                            <h4 className="text-xs font-black text-pink-950 flex items-center gap-1.5">
+                              <span>🌸</span> Equipos de Categoría Femenina ({requeridos} Equipos)
+                            </h4>
+                            {slots.map((slot) => (
+                              <div key={slot.key}>
+                                <label htmlFor={`manual-slot-${slot.key}`} className="block text-[11px] font-bold text-gray-700 mb-1">
+                                  {slot.label}:
+                                </label>
+                                <select
+                                  id={`manual-slot-${slot.key}`}
+                                  required
+                                  value={manualFem[slot.key]}
+                                  onChange={(e) => setManualFem({ ...manualFem, [slot.key]: e.target.value })}
+                                  className="w-full border border-gray-300 p-2.5 rounded-xl text-xs bg-white font-semibold"
+                                >
+                                  <option value="">-- Seleccionar Equipo Femenino --</option>
+                                  {aptosFem.map((eq) => (
+                                    <option key={eq.id} value={eq.id}>
+                                      {eq.nombre}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })()}
 
                       <div className="flex justify-end gap-2 pt-2">
                         <button
@@ -1043,14 +1375,13 @@ export default function Admin() {
       {/* Modal Anotar Gol */}
       {modalGolPartido && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-blue-900 text-left">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-blue-900 text-left" role="dialog" aria-modal="true" aria-label="Registrar gol en vivo">
             <h3 className="text-base font-black text-blue-950 mb-1">⚽ Registrar Gol en Vivo</h3>
             <p className="text-xs text-gray-500 mb-4">{modalGolPartido.nombre}</p>
 
             <form onSubmit={confirmarGolPartido} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">¿Qué equipo anotó el gol?</label>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-2 gap-2 text-xs" role="group" aria-label="¿Qué equipo anotó el gol?">
                   <button
                     type="button"
                     onClick={() => {
@@ -1079,10 +1410,11 @@ export default function Admin() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">
+                <label htmlFor="goal-scorer" className="block text-xs font-bold text-gray-700 mb-1">
                   Seleccionar Jugador Goleador (Plantilla Oficial):
                 </label>
-                <select
+              <select
+                  id="goal-scorer"
                   required
                   className="w-full border border-gray-300 p-2.5 rounded-xl text-xs bg-white"
                   value={jugadorGoleadorElegido}
@@ -1122,14 +1454,15 @@ export default function Admin() {
       {/* Modal Estado / Ganador de Partido */}
       {modalEstadoPartido && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-gray-300 text-left">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border-2 border-gray-300 text-left" role="dialog" aria-modal="true" aria-label="Gestionar encuentro">
             <h3 className="text-base font-black text-blue-950 mb-1">⚙️ Gestionar Encuentro</h3>
             <p className="text-xs text-gray-500 mb-4">{modalEstadoPartido.nombre}</p>
 
             <form onSubmit={confirmarEstadoPartido} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Estado del Partido</label>
+                <label htmlFor="match-status" className="block text-xs font-bold text-gray-700 mb-1">Estado del Partido</label>
                 <select
+                  id="match-status"
                   className="w-full border p-2.5 rounded-xl text-xs bg-white font-semibold"
                   value={nuevoEstadoPartido}
                   onChange={(e) => setNuevoEstadoPartido(e.target.value)}
@@ -1144,10 +1477,11 @@ export default function Admin() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                  <label htmlFor="match-penalties-one" className="block text-[11px] font-bold text-gray-600 mb-1">
                     Penales {modalGolPartido?.equipo1?.nombre || "Eq 1"}
                   </label>
                   <input
+                    id="match-penalties-one"
                     type="number"
                     placeholder="0"
                     value={penales1Input}
@@ -1156,10 +1490,11 @@ export default function Admin() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                  <label htmlFor="match-penalties-two" className="block text-[11px] font-bold text-gray-600 mb-1">
                     Penales {modalGolPartido?.equipo2?.nombre || "Eq 2"}
                   </label>
                   <input
+                    id="match-penalties-two"
                     type="number"
                     placeholder="0"
                     value={penales2Input}
@@ -1170,10 +1505,11 @@ export default function Admin() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">
+                <label htmlFor="match-winner" className="block text-xs font-bold text-gray-700 mb-1">
                   Declarar Ganador (Avanza a la siguiente ronda):
                 </label>
                 <select
+                  id="match-winner"
                   className="w-full border p-2.5 rounded-xl text-xs bg-white font-bold"
                   value={ganadorElegidoId}
                   onChange={(e) => setGanadorElegidoId(e.target.value)}
@@ -1254,16 +1590,6 @@ export default function Admin() {
           >
             <span>📄</span> Planillas PDF
           </button>
-
-          {modo === "simulado" && (
-            <button
-              type="button"
-              onClick={handleResetSimulado}
-              className="border border-gray-300 hover:bg-gray-100 text-gray-700 px-2.5 py-2 rounded-xl text-xs font-semibold"
-            >
-              🔄 Reset Demo
-            </button>
-          )}
         </div>
       </div>
 
@@ -1299,108 +1625,58 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* F13: Card Editor Oficial de Enlace de WhatsApp para Capitanes */}
-      <div className="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-        <div className="flex flex-wrap justify-between items-center gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">💬</span>
-            <div>
-              <h3 className="text-sm font-black text-blue-950">
-                Enlace Oficial del Grupo de WhatsApp para Capitanes
-              </h3>
-              <p className="text-[11px] text-gray-500">
-                Este link se presenta automáticamente a los capitanes en la confirmación de registro y en su portal de equipo.
-              </p>
-            </div>
-          </div>
-          {mensajeWhatsapp && (
-            <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-xl animate-fade-in">
-              ✅ {mensajeWhatsapp.texto}
-            </span>
-          )}
+      <div className="admin-workspace">
+        <aside className="admin-sidebar">
+          <div className="admin-sidebar__title">Áreas de trabajo</div>
+          <nav aria-label="Áreas administrativas">
+            {ADMIN_SECTIONS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={pestanaActiva === key}
+                aria-controls="admin-panel-content"
+                onClick={() => setPestanaActiva(key)}
+                className="admin-sidebar__link"
+              >
+                <Icon size={17} aria-hidden="true" />
+                <span>{label}</span>
+                {key === "equipos" && <span className="admin-nav-count">{equipos.length}</span>}
+                {key === "jugadores" && <span className="admin-nav-count">{jugadores.length}</span>}
+                {key === "usuarios" && <span className="admin-nav-count">{usuarios.length}</span>}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="admin-mobile-nav">
+          <label htmlFor="admin-mobile-area">Área de administración</label>
+          <select
+            id="admin-mobile-area"
+            value={pestanaActiva}
+            onChange={(event) => setPestanaActiva(event.target.value)}
+          >
+            {ADMIN_SECTIONS.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            type="url"
-            placeholder="https://chat.whatsapp.com/..."
-            value={urlWhatsappInput}
-            onChange={(e) => setUrlWhatsappInput(e.target.value)}
-            className="flex-1 border border-gray-300 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-mono bg-white focus:outline-none focus:ring-2 focus:ring-blue-950"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={guardandoWhatsapp}
-              onClick={handleGuardarWhatsapp}
-              className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow flex items-center gap-1.5"
-            >
-              <span>💾</span>
-              <span>{guardandoWhatsapp ? "Guardando..." : "Guardar Enlace"}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleProbarWhatsapp}
-              className="border border-blue-900 text-blue-900 hover:bg-blue-50 font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
-            >
-              <span>🔗</span>
-              <span>Probar Enlace</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Pestañas de Navegación del Panel */}
-      <div className="flex flex-wrap border-b border-gray-200 gap-2">
-        <button
-          type="button"
-          onClick={() => setPestanaActiva("equipos")}
-          className={`pb-3 px-4 text-xs sm:text-sm font-bold border-b-2 transition ${
-            pestanaActiva === "equipos" ? "border-blue-950 text-blue-950 font-black" : "border-transparent text-gray-400"
-          }`}
+        <div
+          id="admin-panel-content"
+          className="admin-panel-content"
+          role="region"
+          aria-label={`Área administrativa: ${ADMIN_SECTIONS.find((section) => section.key === pestanaActiva)?.label || "Panel"}`}
         >
-          Equipos y Pagos ({equipos.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setPestanaActiva("jugadores")}
-          className={`pb-3 px-4 text-xs sm:text-sm font-bold border-b-2 transition ${
-            pestanaActiva === "jugadores" ? "border-blue-950 text-blue-950 font-black" : "border-transparent text-gray-400"
-          }`}
-        >
-          Padrón de Jugadores ({jugadores.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setPestanaActiva("llaves")}
-          className={`pb-3 px-4 text-xs sm:text-sm font-bold border-b-2 transition flex items-center gap-1 ${
-            pestanaActiva === "llaves" ? "border-blue-950 text-blue-950 font-black" : "border-transparent text-gray-400"
-          }`}
-        >
-          <span>🏆</span>
-          <span>Llaves y Sorteo</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setPestanaActiva("resultados")}
-          className={`pb-3 px-4 text-xs sm:text-sm font-bold border-b-2 transition flex items-center gap-1 ${
-            pestanaActiva === "resultados" ? "border-blue-950 text-blue-950 font-black" : "border-transparent text-gray-400"
-          }`}
-        >
-          <span>🔴</span>
-          <span>Resultados en Vivo y Premios</span>
-        </button>
-      </div>
 
       {/* ======================================================== */}
       {/* PESTAÑA 1: EQUIPOS Y COMPROBANTES                        */}
       {/* ======================================================== */}
       {pestanaActiva === "equipos" && (
         <div className="space-y-4">
+          <div className="admin-section-heading">
+            <h2>Equipos y pagos</h2>
+            <p>Revisa inscripciones, comprobantes y estado de pago.</p>
+          </div>
           {equipos.length === 0 ? (
             <div className="bg-white p-12 text-center text-gray-400 text-sm rounded-3xl border">
               No hay equipos registrados todavía.
@@ -1457,6 +1733,7 @@ export default function Admin() {
                     </button>
 
                     <select
+                      aria-label={`Estado de inscripción de ${eq.nombre}`}
                       className="border border-gray-300 p-1.5 rounded-xl text-xs font-semibold bg-white focus:outline-none"
                       value={eq.estado || "Pendiente"}
                       onChange={(e) => handleCambiarEstado(eq.id, e.target.value)}
@@ -1469,6 +1746,7 @@ export default function Admin() {
                     <button
                       type="button"
                       onClick={() => handleEliminarEquipo(eq.id, eq.nombre)}
+                      aria-label={`Eliminar equipo ${eq.nombre}`}
                       title="Eliminar equipo"
                       className="text-red-500 hover:text-red-700 text-xs font-bold p-1.5"
                     >
@@ -1487,9 +1765,14 @@ export default function Admin() {
       {/* ======================================================== */}
       {pestanaActiva === "jugadores" && (
         <div className="space-y-4">
+          <div className="admin-section-heading">
+            <h2>Padrón de jugadores</h2>
+            <p>Busca personas, valida carnets y comprueba el padrón por equipo.</p>
+          </div>
           <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-3">
             <input
               type="search"
+              aria-label="Buscar jugador, cuenta, DNI, equipo o carrera"
               placeholder="Buscar por jugador, cuenta, DNI, equipo o carrera..."
               className="w-full sm:max-w-md border border-gray-300 px-3.5 py-2 rounded-xl text-xs sm:text-sm bg-white"
               value={filtro}
@@ -1579,35 +1862,8 @@ export default function Admin() {
                               <td className="p-3">
                                 {(() => {
                                   const tieneFoto = Boolean(j.fotoDocumento || j.foto_documento);
-                                  const esDocente = esDocenteAutorizado(j.correo);
-
-                                  if (tieneFoto) {
-                                    return (
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setVisorModal({
-                                              titulo: `Carnet de ${j.nombre} — ${eq.nombre}`,
-                                              url: j.fotoDocumento || j.foto_documento
-                                            })
-                                          }
-                                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
-                                        >
-                                          <span>🪪</span>
-                                          <span>Ver</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => abrirModalCarnet(j)}
-                                          className="border border-blue-800 text-blue-900 hover:bg-blue-50 text-[10px] font-bold px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
-                                        >
-                                          <span>✏️</span>
-                                          <span>Cambiar</span>
-                                        </button>
-                                      </div>
-                                    );
-                                  }
+                                  const estadoCarnet = obtenerEstadoCarnet(j);
+                                  const esDocente = estadoCarnet === "exento_docente" || esDocenteAutorizado(j.correo);
 
                                   if (esDocente) {
                                     return (
@@ -1619,18 +1875,80 @@ export default function Admin() {
                                   }
 
                                   return (
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
-                                        ⚠️ Pendiente
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => abrirModalCarnet(j)}
-                                        className="bg-blue-950 hover:bg-blue-900 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
-                                      >
-                                        <span>+</span>
-                                        <span>Subir Carnet</span>
-                                      </button>
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {estadoCarnet === "verificado" ? (
+                                          <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded border border-emerald-300">
+                                            ✅ Verificado
+                                          </span>
+                                        ) : estadoCarnet === "rechazado" ? (
+                                          <span className="text-[10px] bg-red-100 text-red-900 font-bold px-2 py-0.5 rounded border border-red-300">
+                                            ❌ Rechazado
+                                          </span>
+                                        ) : tieneFoto ? (
+                                          <span className="text-[10px] bg-blue-100 text-blue-900 font-semibold px-2 py-0.5 rounded border border-blue-200">
+                                            ⏳ En revisión
+                                          </span>
+                                        ) : (
+                                          <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                                            ⚠️ Pendiente
+                                          </span>
+                                        )}
+
+                                        {tieneFoto && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setVisorModal({
+                                                titulo: `Carnet de ${j.nombre} — ${eq.nombre}`,
+                                                url: j.fotoDocumento || j.foto_documento,
+                                                jugador: j
+                                              })
+                                            }
+                                            className="bg-blue-950 hover:bg-blue-900 text-white text-[10px] font-bold px-2 py-0.5 rounded transition inline-flex items-center gap-1 shadow-sm"
+                                          >
+                                            <span>🪪</span>
+                                            <span>Inspeccionar</span>
+                                          </button>
+                                        )}
+
+                                        {tieneFoto && estadoCarnet !== "verificado" && (
+                                          <button
+                                            type="button"
+                                            disabled={revisandoId === j.id}
+                                            onClick={() => handleRevisarCarnet(j, "verificado")}
+                                            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold px-2 py-0.5 rounded transition shadow-sm"
+                                            title="Aprobar carnet"
+                                          >
+                                            ✓ Aprobar
+                                          </button>
+                                        )}
+
+                                        {tieneFoto && estadoCarnet !== "rechazado" && (
+                                          <button
+                                            type="button"
+                                            disabled={revisandoId === j.id}
+                                            onClick={() => handleRevisarCarnet(j, "rechazado")}
+                                            className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[10px] font-bold px-1.5 py-0.5 rounded transition"
+                                            title="Rechazar carnet con motivo"
+                                          >
+                                            ✕ Rechazar
+                                          </button>
+                                        )}
+
+                                        <button
+                                          type="button"
+                                          onClick={() => abrirModalCarnet(j)}
+                                          className="text-[10px] text-blue-800 hover:underline font-bold px-1 py-0.5"
+                                        >
+                                          {tieneFoto ? "Cambiar" : "+ Subir"}
+                                        </button>
+                                      </div>
+                                      {estadoCarnet === "rechazado" && j.motivoRechazo && (
+                                        <p className="text-[10px] text-red-700 italic">
+                                          Motivo: {j.motivoRechazo}
+                                        </p>
+                                      )}
                                     </div>
                                   );
                                 })()}
@@ -1674,35 +1992,8 @@ export default function Admin() {
                         <td className="p-3">
                           {(() => {
                             const tieneFoto = Boolean(j.fotoDocumento || j.foto_documento);
-                            const esDocente = esDocenteAutorizado(j.correo);
-
-                            if (tieneFoto) {
-                              return (
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setVisorModal({
-                                        titulo: `Carnet de ${j.nombre} — ${j.nombreEquipo || ""}`,
-                                        url: j.fotoDocumento || j.foto_documento
-                                      })
-                                    }
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
-                                  >
-                                    <span>🪪</span>
-                                    <span>Ver</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => abrirModalCarnet(j)}
-                                    className="border border-blue-800 text-blue-900 hover:bg-blue-50 text-[10px] font-bold px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
-                                  >
-                                    <span>✏️</span>
-                                    <span>Cambiar</span>
-                                  </button>
-                                </div>
-                              );
-                            }
+                            const estadoCarnet = obtenerEstadoCarnet(j);
+                            const esDocente = estadoCarnet === "exento_docente" || esDocenteAutorizado(j.correo);
 
                             if (esDocente) {
                               return (
@@ -1714,18 +2005,80 @@ export default function Admin() {
                             }
 
                             return (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
-                                  ⚠️ Pendiente
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => abrirModalCarnet(j)}
-                                  className="bg-blue-950 hover:bg-blue-900 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1 shadow-sm"
-                                >
-                                  <span>+</span>
-                                  <span>Subir Carnet</span>
-                                </button>
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {estadoCarnet === "verificado" ? (
+                                    <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded border border-emerald-300">
+                                      ✅ Verificado
+                                    </span>
+                                  ) : estadoCarnet === "rechazado" ? (
+                                    <span className="text-[10px] bg-red-100 text-red-900 font-bold px-2 py-0.5 rounded border border-red-300">
+                                      ❌ Rechazado
+                                    </span>
+                                  ) : tieneFoto ? (
+                                    <span className="text-[10px] bg-blue-100 text-blue-900 font-semibold px-2 py-0.5 rounded border border-blue-200">
+                                      ⏳ En revisión
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                                      ⚠️ Pendiente
+                                    </span>
+                                  )}
+
+                                  {tieneFoto && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setVisorModal({
+                                          titulo: `Carnet de ${j.nombre} — ${j.nombreEquipo || ""}`,
+                                          url: j.fotoDocumento || j.foto_documento,
+                                          jugador: j
+                                        })
+                                      }
+                                      className="bg-blue-950 hover:bg-blue-900 text-white text-[10px] font-bold px-2 py-0.5 rounded transition inline-flex items-center gap-1 shadow-sm"
+                                    >
+                                      <span>🪪</span>
+                                      <span>Inspeccionar</span>
+                                    </button>
+                                  )}
+
+                                  {tieneFoto && estadoCarnet !== "verificado" && (
+                                    <button
+                                      type="button"
+                                      disabled={revisandoId === j.id}
+                                      onClick={() => handleRevisarCarnet(j, "verificado")}
+                                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold px-2 py-0.5 rounded transition shadow-sm"
+                                      title="Aprobar carnet"
+                                    >
+                                      ✓ Aprobar
+                                    </button>
+                                  )}
+
+                                  {tieneFoto && estadoCarnet !== "rechazado" && (
+                                    <button
+                                      type="button"
+                                      disabled={revisandoId === j.id}
+                                      onClick={() => handleRevisarCarnet(j, "rechazado")}
+                                      className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[10px] font-bold px-1.5 py-0.5 rounded transition"
+                                      title="Rechazar carnet con motivo"
+                                    >
+                                      ✕ Rechazar
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalCarnet(j)}
+                                    className="text-[10px] text-blue-800 hover:underline font-bold px-1 py-0.5"
+                                  >
+                                    {tieneFoto ? "Cambiar" : "+ Subir"}
+                                  </button>
+                                </div>
+                                {estadoCarnet === "rechazado" && j.motivoRechazo && (
+                                  <p className="text-[10px] text-red-700 italic">
+                                    Motivo: {j.motivoRechazo}
+                                  </p>
+                                )}
                               </div>
                             );
                           })()}
@@ -1749,7 +2102,7 @@ export default function Admin() {
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-wrap justify-between items-center gap-4">
             <div>
-              <h3 className="text-lg font-black text-blue-950">Generador de Cruces y Llaves</h3>
+              <h2 className="text-lg font-black text-blue-950">Generador de cruces y llaves</h2>
               <p className="text-xs text-gray-500">
                 Define los enfrentamientos aleatoriamente o ajusta cruces por categoría con equipos elegibles (mínimo 8 carnets verificados y pago confirmado).
               </p>
@@ -1757,6 +2110,7 @@ export default function Admin() {
 
             <div className="flex flex-wrap items-center gap-2">
               <select
+                aria-label="Categoría para generar cruces"
                 className="border border-gray-300 p-2.5 rounded-xl text-xs font-bold bg-white"
                 value={categoriaSorteo}
                 onChange={(e) => setCategoriaSorteo(e.target.value)}
@@ -1874,6 +2228,10 @@ export default function Admin() {
       {/* ======================================================== */}
       {pestanaActiva === "resultados" && (
         <div className="space-y-6">
+          <div className="admin-section-heading">
+            <h2>Resultados en vivo</h2>
+            <p>Publica el estado del torneo, goles y reconocimientos.</p>
+          </div>
           {/* Configuración de Visibilidad y Fecha del Evento */}
           <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
             <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-3">
@@ -1887,16 +2245,20 @@ export default function Admin() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor="event-date" className="sr-only">Fecha del evento</label>
                 <input
+                  id="event-date"
                   type="date"
                   value={torneo?.fechaEvento || CONFIG_TORNEO.fechas.diaEventoDefault}
-                  onChange={(e) => actualizarConfigVisibilidadTorneo({ fechaEvento: e.target.value })}
+                  onChange={(e) => handleActualizarVisibilidadTorneo({ fechaEvento: e.target.value })}
                   className="border p-2 rounded-xl text-xs font-mono font-bold"
                 />
 
+                <label htmlFor="tournament-visibility" className="sr-only">Visibilidad pública del torneo</label>
                 <select
+                  id="tournament-visibility"
                   value={torneo?.visibilidadPublica || "auto"}
-                  onChange={(e) => actualizarConfigVisibilidadTorneo({ visibilidadPublica: e.target.value })}
+                  onChange={(e) => handleActualizarVisibilidadTorneo({ visibilidadPublica: e.target.value })}
                   className="border p-2 rounded-xl text-xs font-bold bg-white"
                 >
                   <option value="auto">Automático (Visible a partir de la fecha)</option>
@@ -1917,6 +2279,7 @@ export default function Admin() {
               {/* Formulario para Crear Criterio */}
               <form onSubmit={handleCrearCriterio} className="flex flex-wrap gap-2 mb-4">
                 <input
+                  aria-label="Ícono del nuevo premio"
                   placeholder="Ícono (ej. 🧤, ⭐, 👟)"
                   value={nuevoCriterioIcono}
                   onChange={(e) => setNuevoCriterioIcono(e.target.value)}
@@ -1924,6 +2287,7 @@ export default function Admin() {
                 />
                 <input
                   required
+                  aria-label="Nombre del nuevo premio"
                   placeholder="Nombre del nuevo premio (ej. Portero con más atajadas, MVP, etc.)"
                   value={nuevoCriterioNombre}
                   onChange={(e) => setNuevoCriterioNombre(e.target.value)}
@@ -1961,6 +2325,7 @@ export default function Admin() {
                       {/* Selector para añadir jugador al criterio */}
                       <div className="flex gap-2">
                         <select
+                          aria-label={`Añadir jugador a ${crit.nombre}`}
                           className="w-full border p-1.5 rounded-lg text-xs bg-white"
                           onChange={(e) => {
                             const jId = e.target.value;
@@ -2024,6 +2389,329 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* PESTAÑA 5: USUARIOS Y SEGURIDAD                          */}
+      {/* ======================================================== */}
+      {pestanaActiva === "usuarios" && (
+        <div className="space-y-6">
+          <div className="admin-section-heading">
+            <h2>Usuarios y seguridad</h2>
+            <p>Administra accesos y consulta alertas de cambios de identidad.</p>
+          </div>
+          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-4">
+              <div>
+                <h3 className="text-lg font-black text-blue-950 flex items-center gap-2">
+                  <span>👥</span> Gestión de Cuentas y Accesos
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Total de usuarios registrados: {usuarios.length}. Genera contraseñas temporales y audita cambios de identidad.
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="border-b bg-gray-50 text-gray-500 uppercase tracking-wider text-[10px]">
+                    <th className="p-3">#</th>
+                    <th className="p-3">Usuario / Nombre</th>
+                    <th className="p-3">Correo Institucional</th>
+                    <th className="p-3">Rol</th>
+                    <th className="p-3">Clase</th>
+                    <th className="p-3">Seguridad</th>
+                    <th className="p-3">Historial</th>
+                    <th className="p-3 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {usuarios.map((u, idx) => {
+                    const cambiosUsuario = historial.filter(
+                      (h) =>
+                        (h.correo && u.correo && h.correo.toLowerCase() === u.correo.toLowerCase()) ||
+                        (h.usuario_id && h.usuario_id === u.id)
+                    );
+                    const tieneAlertaIdentidad = cambiosUsuario.length > 0;
+
+                    return (
+                      <tr key={u.id || idx} className="hover:bg-gray-50">
+                        <td className="p-3 text-gray-400 font-mono">{idx + 1}</td>
+                        <td className="p-3">
+                          <strong className="text-gray-900 block">{u.nombre || "Sin nombre registrado"}</strong>
+                          <span className="text-[10px] text-gray-400 font-mono">ID: {u.id?.slice(0, 8)}...</span>
+                        </td>
+                        <td className="p-3 font-mono text-gray-700">{u.correo}</td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              u.rol === "admin"
+                                ? "bg-purple-100 text-purple-900 border border-purple-200"
+                                : u.rol === "docente"
+                                ? "bg-emerald-100 text-emerald-900 border border-emerald-200"
+                                : "bg-blue-50 text-blue-900 border border-blue-200"
+                            }`}
+                          >
+                            {u.rol || "jugador"}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono text-gray-600 text-[11px]">
+                          {u.codigo_clase ? `${u.codigo_clase} — ${u.nombre_clase || ""}` : "-"}
+                        </td>
+                        <td className="p-3">
+                          {u.debe_cambiar_password ? (
+                            <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">
+                              🔑 Debe cambiar clave
+                            </span>
+                          ) : (
+                            <span className="bg-emerald-50 text-emerald-700 text-[10px] font-semibold px-2 py-0.5 rounded border border-emerald-200">
+                              ✅ Activa
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {tieneAlertaIdentidad ? (
+                            <button
+                              type="button"
+                              onClick={() => setModalHistorialUsuario({ correo: u.correo, cambios: cambiosUsuario })}
+                              className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1"
+                            >
+                              <span>⚠️</span>
+                              <span>{cambiosUsuario.length} cambios</span>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">Sin cambios</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            disabled={generandoTempPassword}
+                            onClick={() => handleGenerarPasswordTemporal(u)}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-2.5 py-1 rounded-xl text-xs font-bold transition inline-flex items-center gap-1 shadow-sm disabled:opacity-50"
+                            title="Generar contraseña temporal"
+                          >
+                            <span>🔑</span>
+                            <span>Temp Password</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* PESTAÑA 6: CONFIGURACIÓN OPERATIVA                       */}
+      {/* ======================================================== */}
+      {pestanaActiva === "configuracion" && (
+        <div className="space-y-6">
+          <div className="admin-section-heading">
+            <h2>Configuración</h2>
+            <p>Gestiona límites, fechas y publicaciones del torneo.</p>
+          </div>
+          <section className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xl" aria-hidden="true">💬</span>
+                <div>
+                  <h3 className="text-sm font-black text-blue-950">
+                    Enlace del grupo de WhatsApp para capitanes
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    Se muestra a los capitanes al completar la inscripción y en el portal del equipo.
+                  </p>
+                </div>
+              </div>
+              {mensajeWhatsapp && (
+                <span className="state-message text-xs font-bold" role="status">
+                  {mensajeWhatsapp.texto}
+                </span>
+              )}
+            </div>
+
+            <label htmlFor="admin-whatsapp-url" className="sr-only">Enlace del grupo de WhatsApp</label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                id="admin-whatsapp-url"
+                type="url"
+                placeholder="https://chat.whatsapp.com/..."
+                value={urlWhatsappInput}
+                onChange={(e) => setUrlWhatsappInput(e.target.value)}
+                className="flex-1 border border-gray-300 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-mono bg-white focus:outline-none focus:ring-2 focus:ring-blue-950"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={guardandoWhatsapp}
+                  onClick={handleGuardarWhatsapp}
+                  className="bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow flex items-center gap-1.5"
+                >
+                  <span aria-hidden="true">💾</span>
+                  <span>{guardandoWhatsapp ? "Guardando..." : "Guardar enlace"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleProbarWhatsapp}
+                  className="border border-blue-900 text-blue-900 hover:bg-blue-50 font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
+                >
+                  <span aria-hidden="true">🔗</span>
+                  <span>Probar enlace</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-200 shadow-sm space-y-6">
+            <div className="border-b pb-4">
+              <h3 className="text-xl font-black text-blue-950 flex items-center gap-2">
+                <span>⚙️</span> Parámetros Operativos del Torneo
+              </h3>
+              <p className="text-xs text-gray-500">
+                Ajusta los límites reglamentarios, fechas límites de inscripción y la visibilidad de datos al público.
+              </p>
+            </div>
+
+            {mensajeConfig && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-bold">
+                ✅ {mensajeConfig.texto}
+              </div>
+            )}
+
+            <form onSubmit={handleGuardarConfiguracionGeneral} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Estado de inscripciones */}
+                <div className="p-4 bg-gray-50 rounded-2xl border space-y-2">
+                  <label className="block text-xs font-bold text-gray-800">
+                    Estado de Inscripciones Públicas
+                  </label>
+                  <p className="text-[11px] text-gray-500">
+                    Habilita o cierra el registro de nuevos equipos y auto-incorporación de jugadores.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleToggleInscripciones}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                      configuracion.inscripcionesAbiertas
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                        : "bg-red-600 hover:bg-red-700 text-white"
+                    }`}
+                  >
+                    <span>
+                      {configuracion.inscripcionesAbiertas ? "🟢 Inscripciones Abiertas" : "🔴 Inscripciones Cerradas"}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Máximo de jugadores por equipo */}
+                <div className="p-4 bg-gray-50 rounded-2xl border space-y-2">
+                  <label htmlFor="config-max-players" className="block text-xs font-bold text-gray-800">
+                    Máximo de Jugadores por Plantilla
+                  </label>
+                  <p className="text-[11px] text-gray-500">
+                    Límite máximo permitido de integrantes por equipo (mínimo 8 reglamentario).
+                  </p>
+                  <input
+                    id="config-max-players"
+                    type="number"
+                    min="8"
+                    max="25"
+                    value={cfgMaxJugadores}
+                    onChange={(e) => setCfgMaxJugadores(e.target.value)}
+                    className="w-32 border border-gray-300 p-2.5 rounded-xl text-sm font-bold bg-white"
+                  />
+                </div>
+
+                {/* Fecha de cierre de inscripciones */}
+                <div className="p-4 bg-gray-50 rounded-2xl border space-y-2">
+                  <label htmlFor="config-registration-deadline" className="block text-xs font-bold text-gray-800">
+                    Fecha Límite de Inscripciones
+                  </label>
+                  <p className="text-[11px] text-gray-500">
+                    A partir de esta fecha, el sistema cerrará automáticamente las inscripciones.
+                  </p>
+                  <input
+                    id="config-registration-deadline"
+                    type="date"
+                    value={cfgFechaCierre}
+                    onChange={(e) => setCfgFechaCierre(e.target.value)}
+                    className="border border-gray-300 p-2.5 rounded-xl text-xs font-bold bg-white"
+                  />
+                </div>
+
+              </div>
+
+              {/* Visibilidad de Torneo y Publicaciones */}
+              <div className="p-5 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-4">
+                <h4 className="text-sm font-bold text-blue-950 flex items-center gap-1.5">
+                  <span>📢</span> Publicación Selectiva en &quot;Torneo en Vivo&quot;
+                </h4>
+                <p className="text-xs text-gray-500">
+                  Controla qué secciones ven los estudiantes y docentes en la pestaña pública del torneo.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="flex items-center gap-2.5 bg-white p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      checked={cfgPublicarGoleadores}
+                      onChange={(e) => setCfgPublicarGoleadores(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-950 focus:ring-blue-900"
+                    />
+                    <div>
+                      <strong className="block text-xs text-gray-800">Tabla de Goleadores</strong>
+                      <span className="text-[10px] text-gray-400">Mostrar goles acumulados</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 bg-white p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      checked={cfgPublicarClasificacion}
+                      onChange={(e) => setCfgPublicarClasificacion(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-950 focus:ring-blue-900"
+                    />
+                    <div>
+                      <strong className="block text-xs text-gray-800">Tabla de Clasificación</strong>
+                      <span className="text-[10px] text-gray-400">Puntos y diferencia de goles</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 bg-white p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      checked={cfgPublicarPremios}
+                      onChange={(e) => setCfgPublicarPremios(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-950 focus:ring-blue-900"
+                    />
+                    <div>
+                      <strong className="block text-xs text-gray-800">Premios y Reconocimientos</strong>
+                      <span className="text-[10px] text-gray-400">Criterios dinámicos asignados</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={guardandoConfig}
+                  className="bg-blue-950 hover:bg-blue-900 text-white font-bold text-xs sm:text-sm px-6 py-3 rounded-xl transition shadow flex items-center gap-2 disabled:opacity-50"
+                >
+                  <span>💾</span>
+                  <span>{guardandoConfig ? "Guardando..." : "Guardar Toda la Configuración"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -99,8 +99,13 @@ export default function ReglamentoModal() {
   if (!abierto) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-fade-in">
+    <div className="fixed inset-0 z-[100] bg-black/75 flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-fade-in">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="regulation-dialog-title"
+        aria-describedby="regulation-dialog-description"
+        tabIndex={-1}
         style={{ height: "88vh", maxHeight: "850px" }}
         className="bg-white rounded-3xl max-w-3xl w-full flex flex-col shadow-2xl border-2 border-blue-900 overflow-hidden"
       >
@@ -109,10 +114,10 @@ export default function ReglamentoModal() {
           <div className="inline-flex items-center gap-2 bg-blue-900/80 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-blue-200 mb-2">
             <span>⚽</span> Torneo Oficial de Fútbol
           </div>
-          <h2 className="text-xl sm:text-2xl font-black tracking-tight">
+          <h2 id="regulation-dialog-title" className="text-xl sm:text-2xl font-black tracking-tight">
             REGLAMENTO OFICIAL – MECAFUT 2026
           </h2>
-          <p className="text-xs sm:text-sm text-blue-200 mt-1 max-w-lg mx-auto">
+          <p id="regulation-dialog-description" className="text-xs sm:text-sm text-blue-200 mt-1 max-w-lg mx-auto">
             Facultad de Ingeniería Mecatrónica — Es obligatorio leer hasta el final para acceder.
           </p>
 
@@ -129,6 +134,8 @@ export default function ReglamentoModal() {
         <div
           ref={containerRef}
           onScroll={handleScroll}
+          tabIndex={0}
+          aria-label="Texto del reglamento. Desplázate hasta el final para continuar."
           className="p-5 sm:p-8 overflow-y-auto flex-1 min-h-0 space-y-6 text-gray-800 text-xs sm:text-sm leading-relaxed"
         >
           {REGLAMENTO_OFICIAL_SECCIONES.map((sec) => (

@@ -75,29 +75,13 @@ globalThis.window = {
 };
 
 // Import Production Modules
-const { esJugadorHabilitado } = await import('../lib/dbService.js');
+const { esJugadorHabilitado, esEquipoAptoParaLlaves } = await import('../lib/dbService.js');
 const { CONFIG_TORNEO, esDocenteAutorizado } = await import('../lib/torneoConfig.js');
 const {
   generarBracketEliminacion,
   generarTriangularFemenino,
   propagarGanadorEliminacion
 } = await import('../lib/bracketUtils.js');
-
-// Extract esEquipoAptoParaLlaves from app/admin/page.jsx logic
-function esEquipoAptoParaLlaves(equipo, todosJugadores = []) {
-  if (!equipo) return false;
-  const estadoPago = String(equipo.estado || "Pendiente").toLowerCase();
-  const pagoAprobado =
-    equipo.pagoConfirmado === true ||
-    estadoPago === "confirmado" ||
-    estadoPago === "pagado" ||
-    estadoPago === "aprobado";
-  if (!pagoAprobado) return false;
-
-  const integrantes = (todosJugadores || []).filter((j) => j && j.equipoId === equipo.id);
-  const habilitados = integrantes.filter(esJugadorHabilitado).length;
-  return habilitados >= CONFIG_TORNEO.plantilla.min;
-}
 
 // Test Runner Framework
 const suites = [];
@@ -354,7 +338,8 @@ describe('DIMENSION 2: Eligibility Matrix Under Extreme Inputs', () => {
       correo: `estudiante${index}@unitec.edu`,
       dni: `08011999000${index}`,
       tipoDocumento: 'carnet',
-      fotoDocumento: tieneFoto ? `data:image/jpeg;base64,foto${index}` : null,
+      fotoDocumento: tieneFoto ? `data:image/jpeg;base64,foto_verificada_${index}` : null,
+      estadoCarnet: tieneFoto ? 'verificado' : 'pendiente',
       carrera: 'Ingeniería Mecatrónica'
     };
   }
@@ -520,7 +505,8 @@ describe('DIMENSION 2: Eligibility Matrix Under Extreme Inputs', () => {
           equipoId: i % 4 === 0 ? "alien-eq" : `eq-${i}`, // Some belong to other teams
           nombre: `P ${pIdx}`,
           correo: isDoc ? "juan.mejia@unitec.edu.hn" : `student${pIdx}@unitec.edu`,
-          fotoDocumento: hasPhoto ? "data:photo" : null,
+          fotoDocumento: hasPhoto ? "data:image/jpeg;base64,photo_verif" : null,
+          estadoCarnet: hasPhoto ? "verificado" : "pendiente",
           foto_documento: null
         };
       });
@@ -541,7 +527,7 @@ describe('DIMENSION 2: Eligibility Matrix Under Extreme Inputs', () => {
 
 describe('DIMENSION 3: Carnet Update Concurrency & Array Immutability', () => {
 
-  // Reducer from app/admin/page.jsx:262-273
+  // Reducer from app/admin/page.jsx
   function updateCarnetReducer(prevJugadores, modalJugadorId, carnetDataUrl) {
     return prevJugadores.map((j) =>
       j.id === modalJugadorId
@@ -549,6 +535,8 @@ describe('DIMENSION 3: Carnet Update Concurrency & Array Immutability', () => {
             ...j,
             fotoDocumento: carnetDataUrl,
             foto_documento: carnetDataUrl,
+            estadoCarnet: "verificado",
+            estado_carnet: "verificado",
             estado: "Aprobado"
           }
         : j
@@ -688,10 +676,11 @@ describe('DIMENSION 4: Static Source Code Integrity Audit', () => {
   const adminPath = path.join(projectRoot, 'app', 'admin', 'page.jsx');
   const adminCode = fs.readFileSync(adminPath, 'utf8');
 
-  test('T4.1: Exported esEquipoAptoParaLlaves function exists with correct signature', () => {
+  test('T4.1: Exported esEquipoAptoParaLlaves function exists in app/admin/page.jsx', () => {
     assert.ok(
-      adminCode.includes('export function esEquipoAptoParaLlaves(equipo, todosJugadores = [])'),
-      "esEquipoAptoParaLlaves must be exported with default todosJugadores = []"
+      adminCode.includes('export { esEquipoAptoParaLlaves }') ||
+      adminCode.includes('export function esEquipoAptoParaLlaves'),
+      "esEquipoAptoParaLlaves must be exported from app/admin/page.jsx"
     );
   });
 
@@ -704,12 +693,12 @@ describe('DIMENSION 4: Static Source Code Integrity Audit', () => {
     assert.ok(!adminCode.includes('modo === "firebase" ? "Servidor Oficial" : "Modo Simulado"'), "Legacy badge logic removed");
   });
 
-  test('T4.3: Manual Bracket modal and validation algorithms present for both categories', () => {
+  test('T4.3: Manual Bracket modal and validation algorithms present for both categories (including dual 3/4 Femenino)', () => {
     assert.ok(adminCode.includes('handleGuardarManualMasculino'), "Must have handleGuardarManualMasculino");
     assert.ok(adminCode.includes('handleGuardarManualFemenino'), "Must have handleGuardarManualFemenino");
     assert.ok(adminCode.includes('handleAutocompletarManual'), "Must have handleAutocompletarManual");
     assert.ok(adminCode.includes('setIds.size !== 12'), "Must have 12-team masculine set uniqueness validation");
-    assert.ok(adminCode.includes('setIds.size !== 3'), "Must have 3-team feminine set uniqueness validation");
+    assert.ok(adminCode.includes('setIds.size !== requeridos'), "Must have dynamic 3/4-team feminine set uniqueness validation");
     assert.ok(adminCode.includes('modalArmadoManual'), "Must have modalArmadoManual state");
   });
 

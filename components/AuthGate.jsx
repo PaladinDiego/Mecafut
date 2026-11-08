@@ -156,8 +156,8 @@ export default function AuthGate({ children }) {
     }
     setLoadingCambioObligatorio(true);
     try {
-      const sesionActualizada = await cambiarPasswordObligatorio(nuevaPasswordObligatoria);
-      setSesion(sesionActualizada);
+      const resCambio = await cambiarPasswordObligatorio(nuevaPasswordObligatoria);
+      setSesion(resCambio?.sesion || resCambio);
       setNuevaPasswordObligatoria("");
       setConfirmarPasswordObligatoria("");
     } catch (err) {

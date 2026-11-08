@@ -257,19 +257,79 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.rpc_cerrar_sesion(text) TO anon, authenticated;
 
--- 5. OTP SEGURO DE SERVIDOR: DESHABILITAR CLIENT-OTP Y REGISTRAR SERVER-OTP
+-- 5. OTP SEGURO CON COOLDOWN Y BLOQUEO ATÓMICO EN SERVIDOR
 CREATE OR REPLACE FUNCTION public.rpc_registrar_otp_cliente(p_correo text, p_codigo text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, extensions
 AS $$
+DECLARE
+  v_correo text := lower(trim(coalesce(p_correo, '')));
+  v_codigo text := trim(coalesce(p_codigo, ''));
+  v_prev public.auth_otps;
+  v_admin_ya_registrado boolean;
+  v_elapsed_seconds numeric;
 BEGIN
-  RAISE EXCEPTION 'Operación deshabilitada por motivos de seguridad. Los códigos OTP solo pueden ser emitidos por el servidor.';
+  IF NOT public.es_correo_institucional(v_correo) THEN
+    RETURN jsonb_build_object(
+      'ok', false,
+      'reason', 'invalid_domain',
+      'error', 'Acceso restringido: Solo se admiten correos institucionales oficiales (@unitec.edu o @unitec.edu.hn).'
+    );
+  END IF;
+
+  IF v_codigo = '' OR v_codigo !~ '^[0-9]{6}$' OR v_codigo = '123456' THEN
+    RETURN jsonb_build_object(
+      'ok', false,
+      'reason', 'invalid_format',
+      'error', 'Código de verificación generado inválido.'
+    );
+  END IF;
+
+  IF public.es_admin_oficial(v_correo) THEN
+    SELECT EXISTS (
+      SELECT 1 FROM public.usuarios WHERE lower(correo) = v_correo AND coalesce(password_hash, '') <> ''
+    ) INTO v_admin_ya_registrado;
+
+    IF v_admin_ya_registrado THEN
+      RETURN jsonb_build_object(
+        'ok', false,
+        'reason', 'admin_protected',
+        'error', 'Esta cuenta administrativa ya tiene contraseña activa. Ingresa en la pestaña «Iniciar sesión».'
+      );
+    END IF;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('otp:' || v_correo));
+
+  SELECT * INTO v_prev FROM public.auth_otps WHERE correo = v_correo FOR UPDATE;
+  IF FOUND AND v_prev.ultimo_envio_en IS NOT NULL THEN
+    v_elapsed_seconds := extract(epoch FROM (now() - v_prev.ultimo_envio_en));
+    IF v_elapsed_seconds < 45 THEN
+      RETURN jsonb_build_object(
+        'ok', false,
+        'reason', 'cooldown',
+        'error', 'Ya se envió un código recientemente. Espera ' || ceil(45 - v_elapsed_seconds)::int || ' segundos antes de solicitar otro.'
+      );
+    END IF;
+  END IF;
+
+  INSERT INTO public.auth_otps (correo, otp_hash, expira_en, intentos, origen_servidor, ultimo_envio_en, usado)
+  VALUES (v_correo, crypt(v_codigo, gen_salt('bf', 8)), now() + interval '10 minutes', 0, true, now(), false)
+  ON CONFLICT (correo) DO UPDATE
+  SET otp_hash = EXCLUDED.otp_hash,
+      expira_en = EXCLUDED.expira_en,
+      intentos = 0,
+      origen_servidor = true,
+      ultimo_envio_en = now(),
+      usado = false;
+
+  RETURN jsonb_build_object('ok', true, 'expiraEnMinutos', 10);
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.rpc_registrar_otp_cliente(text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.rpc_registrar_otp_cliente(text, text) TO anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.rpc_registrar_otp_servidor(
   p_correo text,
@@ -557,7 +617,7 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.rpc_restablecer_password_con_otp(text, text, text) TO anon, authenticated;
 
--- 8. LOGIN DE USUARIOS CON MANEJO DE CONTRASEÑA TEMPORAL
+-- 8. LOGIN DE USUARIOS CON COMPATIBILIDAD SHA-256 + BCRYPT + CONTRASEÑA TEMPORAL
 CREATE OR REPLACE FUNCTION public.rpc_iniciar_sesion(
   p_correo text,
   p_password text
@@ -570,18 +630,23 @@ AS $$
 DECLARE
   v_correo text := lower(trim(coalesce(p_correo, '')));
   v_user public.usuarios;
+  v_ok boolean := false;
   v_sesion jsonb;
 BEGIN
+  IF v_correo = '' OR coalesce(p_password, '') = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Ingresa tu correo institucional y tu contraseña.');
+  END IF;
+
   PERFORM pg_advisory_xact_lock(hashtext('login:' || v_correo));
 
-  SELECT * INTO v_user FROM public.usuarios WHERE correo = v_correo FOR UPDATE;
+  SELECT * INTO v_user FROM public.usuarios WHERE lower(correo) = v_correo FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'Correo o contraseña incorrectos.');
+  IF NOT FOUND OR coalesce(v_user.password_hash, '') = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'No encontramos una cuenta con contraseña para este correo. Usa «Crear cuenta / Recuperar clave».');
   END IF;
 
   IF v_user.bloqueado_hasta IS NOT NULL AND v_user.bloqueado_hasta > now() THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'Cuenta bloqueada temporalmente por intentos fallidos. Intenta nuevamente en unos minutos.');
+    RETURN jsonb_build_object('ok', false, 'error', 'Cuenta temporalmente protegida tras varios intentos fallidos. Intenta de nuevo en unos minutos.');
   END IF;
 
   -- Si era una clave temporal que ya fue consumida para un login anterior sin haberla cambiado: RECHAZAR
@@ -592,10 +657,28 @@ BEGIN
     );
   END IF;
 
-  IF crypt(p_password, v_user.password_hash) <> v_user.password_hash THEN
+  IF left(v_user.password_hash, 2) = '$2' THEN
+    v_ok := (v_user.password_hash = crypt(p_password, v_user.password_hash));
+  ELSE
+    -- Compatibilidad con cuentas preexistentes SHA-256 y migración transparente a bcrypt
+    v_ok := (
+      v_user.password_hash = encode(
+        digest(convert_to('mecafut2026|' || v_correo || '|' || p_password, 'UTF8'), 'sha256'),
+        'hex'
+      )
+    );
+    IF v_ok THEN
+      UPDATE public.usuarios
+      SET password_hash = crypt(p_password, gen_salt('bf', 10)),
+          actualizado_en = now()
+      WHERE usuario_id = v_user.usuario_id;
+    END IF;
+  END IF;
+
+  IF NOT v_ok THEN
     UPDATE public.usuarios
-    SET intentos_login = intentos_login + 1,
-        bloqueado_hasta = CASE WHEN intentos_login + 1 >= 5 THEN now() + interval '15 minutes' ELSE NULL END,
+    SET intentos_login = coalesce(intentos_login, 0) + 1,
+        bloqueado_hasta = CASE WHEN coalesce(intentos_login, 0) + 1 >= 5 THEN now() + interval '10 minutes' ELSE NULL END,
         actualizado_en = now()
     WHERE usuario_id = v_user.usuario_id;
 
@@ -622,7 +705,20 @@ BEGIN
 
   RETURN jsonb_build_object(
     'ok', true,
-    'sesion', v_sesion
+    'sesion', v_sesion,
+    'perfil', jsonb_build_object(
+      'usuario_id', v_user.usuario_id,
+      'correo', v_user.correo,
+      'nombre', v_user.nombre,
+      'cuenta', v_user.cuenta,
+      'dni', v_user.dni,
+      'telefono', v_user.telefono,
+      'carrera', v_user.carrera,
+      'nombre_clase', v_user.nombre_clase,
+      'codigo_clase', v_user.codigo_clase,
+      'foto_documento', v_user.foto_documento,
+      'tipo_documento', v_user.tipo_documento
+    )
   );
 END;
 $$;

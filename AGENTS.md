@@ -82,3 +82,29 @@ npm run build
 
 - Arquitectura SQL, RPCs, Edge Functions y variables de entorno: [`DEPLOYMENT_AI_GUIDE.md`](./DEPLOYMENT_AI_GUIDE.md).
 - Resumen general del proyecto y estructura de carpetas: [`README.md`](./README.md).
+
+---
+
+## 5. ⚖️ Protocolo de Paridad Irrenunciable Local-Producción y Sandbox Limpio
+
+1. **Prohibición Total de Bypasses en Código de Producción:**
+   - Queda terminantemente prohibido introducir condicionales como `isLocalMode`, botones de "Acceso Demo", contraseñas hardcodeadas o códigos OTP de bypass (`123456`) dentro de `app/`, `components/` o `lib/`.
+   - Si se requiere simulación, esta debe residir exclusivamente en scripts de prueba aislados en `tests/` o mediante inyección de dependencias mock en tests E2E, jamás alterando el árbol de componentes del runtime de producción.
+
+2. **Invariante Atómica Frontend-Backend (Dual-Contract Sync):**
+   - Toda regla de autorización, lista blanca de correos, límite de cupos o validación de estado definida en el frontend (`lib/torneoConfig.js` o componentes) DEBE tener su contraparte idéntica y sincronizada en las funciones SQL de Supabase (`SECURITY DEFINER`) dentro de la misma tarea.
+   - Está prohibido dar por finalizada una tarea de permisos modificando solo el frontend sin auditar y migrar la función SQL correspondiente (`public.es_admin_oficial`, `public.es_correo_admin`, etc.).
+
+3. **Higiene de Caché y Compilación Limpia:**
+   - Antes de cualquier prueba E2E o compilación de exportación estática, debe garantizarse la limpieza del directorio temporal `.next/` para evitar colisiones de fragmentos webpack (`Cannot find module './472.js'`).
+
+4. **Transparencia en Errores de Autenticación y Restricciones de Seguridad:**
+   - La interfaz jamás debe enmascarar una regla de negocio legítima (ej. "Las cuentas de administrador no pueden resetear clave por OTP público") con un error genérico de fallo de conexión. Los mensajes deben ser explícitos y contrastados contra el estado real del servidor.
+
+5. **Compuerta de Preflight con Conexión Viva (Zero-Mock Preflight):**
+   - Antes de desplegar en Netlify, verificar que:
+     a) Las migraciones SQL pendientes ya fueron aplicadas en el proyecto Supabase activo.
+     b) La suite de pruebas E2E aprueba al 100% (0 fallos).
+     c) `npm run build` genera la carpeta `out/` sin errores de exportación estática.
+     d) El usuario ha otorgado su confirmación explícita para el despliegue.
+

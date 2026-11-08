@@ -48,14 +48,16 @@ export default function AuthGate({ children }) {
   const [errorPerfil, setErrorPerfil] = useState("");
 
   useEffect(() => {
-    verificarEstadoAuth();
-    const handleAuthChange = () => verificarEstadoAuth();
+    verificarEstadoAuth(false);
+    const handleAuthChange = () => verificarEstadoAuth(true);
     window.addEventListener("mecafut_auth_change", handleAuthChange);
     return () => window.removeEventListener("mecafut_auth_change", handleAuthChange);
   }, []);
 
-  const verificarEstadoAuth = async () => {
-    setCargandoSesion(true);
+  const verificarEstadoAuth = async (silent = false) => {
+    if (!silent) {
+      setCargandoSesion(true);
+    }
     const s = obtenerSesionActual();
     setSesion(s);
 

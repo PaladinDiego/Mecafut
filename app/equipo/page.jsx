@@ -165,8 +165,14 @@ export default function VerEquipo() {
 
     try {
       const res = await agregarJugadorConCodigo(codigo, nuevoJugador);
-      setEquipo(res.equipo);
-      setJugadores(res.jugadores);
+      if (res?.equipo && res?.jugadores) {
+        setEquipo(res.equipo);
+        setJugadores(res.jugadores);
+      } else {
+        const fullData = await buscarEquipoPorCodigo(codigo);
+        setEquipo(fullData.equipo);
+        setJugadores(fullData.jugadores);
+      }
       setMensajeJugador("¡Jugador agregado exitosamente a la plantilla!");
       setMostrarFormNuevo(false);
       setNuevoJugador({
@@ -194,8 +200,14 @@ export default function VerEquipo() {
       setMensajeJugador("");
       try {
         const res = await expulsarJugador({ codigoAcceso: codigo, jugadorId: jugador.id });
-        setEquipo(res.equipo);
-        setJugadores(res.jugadores);
+        if (res?.equipo && res?.jugadores) {
+          setEquipo(res.equipo);
+          setJugadores(res.jugadores);
+        } else {
+          const fullData = await buscarEquipoPorCodigo(codigo);
+          setEquipo(fullData.equipo);
+          setJugadores(fullData.jugadores);
+        }
         setMensajeJugador(`Se ha expulsado a ${jugador.nombre} de la plantilla correctamente.`);
       } catch (err) {
         setError(err.message || "Error al expulsar integrante.");

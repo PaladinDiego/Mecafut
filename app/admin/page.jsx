@@ -22,12 +22,13 @@ import {
 } from "../../lib/dbService";
 import { exportarExcelOficial, exportarPDFPlanillas } from "../../lib/exportUtils";
 import { notifyUser } from "../../lib/uiFeedback";
-import { CONFIG_TORNEO, esDocenteAutorizado } from "../../lib/torneoConfig";
+import { CONFIG_TORNEO, esDocenteAutorizado, esAdminAutorizado } from "../../lib/torneoConfig";
 import { ClipboardList, GitBranch, Radio, Settings, Shield, Users } from "lucide-react";
 import {
   obtenerSesionActual,
   verificarOtp,
   verificarSesionServidor,
+  verificarAccesoAdmin,
   generarPasswordTemporalAdmin
 } from "../../lib/authService";
 import {
@@ -66,7 +67,8 @@ export function esEquipoAptoParaLlaves(equipo, todosJugadores = []) {
 }
 
 export default function Admin() {
-  const [isLogged, setIsLogged] = useState(false);
+  const [authStatus, setAuthStatus] = useState("cargando"); // "cargando" | "autorizado" | "denegado" | "sin_sesion"
+  const isLogged = authStatus === "autorizado";
   const [jugadores, setJugadores] = useState([]);
   const [equipos, setEquipos] = useState([]);
   const [configuracion, setConfiguracion] = useState({ inscripcionesAbiertas: true });
@@ -154,24 +156,58 @@ export default function Admin() {
 
   useEffect(() => {
     let cancelado = false;
+    let dataFetched = false;
+
     const validarAccesoAdmin = async () => {
       const sLocal = obtenerSesionActual();
       setSesionActual(sLocal);
-      if (!sLocal || sLocal.rol !== "admin") {
-        setIsLogged(false);
+
+      if (!sLocal) {
+        if (!cancelado) setAuthStatus("sin_sesion");
         return;
       }
-      const sValida = await verificarSesionServidor();
-      if (cancelado) return;
-      if (sValida && sValida.rol === "admin") {
-        setSesionActual(sValida);
-        setIsLogged(true);
-        fetchData();
-      } else {
-        setSesionActual(obtenerSesionActual());
-        setIsLogged(false);
+
+      const tienePrivilegioLocal =
+        sLocal.rol === "admin" ||
+        sLocal.esAdmin === true ||
+        esAdminAutorizado(sLocal.correo);
+
+      if (tienePrivilegioLocal) {
+        if (!cancelado) {
+          setAuthStatus("autorizado");
+          dataFetched = true;
+          fetchData();
+        }
+      }
+
+      try {
+        const sValida = await verificarSesionServidor();
+        if (cancelado) return;
+
+        const esAdminFinal =
+          (sValida && (sValida.rol === "admin" || sValida.esAdmin === true || esAdminAutorizado(sValida.correo))) ||
+          (!sValida && tienePrivilegioLocal);
+
+        if (esAdminFinal) {
+          if (sValida) setSesionActual(sValida);
+          setAuthStatus("autorizado");
+          if (!dataFetched) {
+            dataFetched = true;
+            fetchData();
+          }
+        } else {
+          setAuthStatus("denegado");
+        }
+      } catch (err) {
+        if (cancelado) return;
+        if (tienePrivilegioLocal) {
+          setAuthStatus("autorizado");
+        } else {
+          setAuthStatus("denegado");
+        }
       }
     };
+
     validarAccesoAdmin();
     return () => {
       cancelado = true;
@@ -795,7 +831,19 @@ export default function Admin() {
     plantilla: jugadoresFiltrados.filter((j) => j.equipoId === eq.id)
   }));
 
-  if (!isLogged) {
+  if (authStatus === "cargando") {
+    return (
+      <div className="min-h-[75vh] flex items-center justify-center p-4" role="status" aria-live="polite">
+        <div className="text-center space-y-3 animate-fade-in">
+          <div className="w-10 h-10 border-4 border-blue-900 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm font-semibold text-blue-950">Verificando credenciales administrativas...</p>
+          <p className="text-xs text-gray-400 font-mono">MECAFUT 2026 · Acceso Seguro</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === "denegado" || authStatus === "sin_sesion" || !isLogged) {
     return (
       <div className="min-h-[75vh] flex items-center justify-center p-4">
         <div className="bg-white p-8 rounded-3xl border border-gray-200 shadow-xl w-full max-w-md text-center animate-fade-in">
@@ -809,7 +857,7 @@ export default function Admin() {
             <p>
               El acceso a este panel está restringido exclusivamente a las cuentas oficiales autorizadas en la lista blanca del Comité Organizador.
             </p>
-            {sesionActual ? (
+            {authStatus === "denegado" && sesionActual ? (
               <p className="text-red-700 font-semibold">
                 Has iniciado sesión como <strong>{sesionActual.correo}</strong>, pero esta cuenta no cuenta con rol de Administrador.
               </p>

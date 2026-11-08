@@ -384,7 +384,8 @@ if (isDirectCli) {
         'tier3_pairwise.test.mjs',
         'tier4_workloads.test.mjs',
         'tier5_security_audit_patch.test.mjs',
-        'tier6_kiss_classes_security.test.mjs'
+        'tier6_kiss_classes_security.test.mjs',
+        'tier7_admin_auth_stability.test.mjs'
       ];
 
       const filter = args[0] ? args[0].toLowerCase() : null;

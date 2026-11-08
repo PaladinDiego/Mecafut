@@ -587,3 +587,15 @@ describe('Tier 6: Clases Representadas, Serie Femenina 2 Equipos y Seguridad Adm
     });
   });
 });
+
+describe('Tier 7: Contrato SQL de sesión (regresión cierre de sesión de admin)', () => {
+  it('rpc_validar_sesion devuelve { ok, sesion.token } esperado por verificarSesionServidor y no deja sobrecargas ambiguas', async () => {
+    const fs = await import('node:fs');
+    const sql = fs.readFileSync(new URL('../../supabase/migrations/2026110703_kiss_security_classes_admin.sql', import.meta.url), 'utf8');
+    const bloque = sql.slice(sql.indexOf('FUNCTION public.rpc_validar_sesion'), sql.indexOf('FUNCTION public.rpc_cerrar_sesion'));
+    expect(/'ok',\s*true/.test(bloque)).toBe(true);
+    expect(/'sesion',\s*jsonb_build_object/.test(bloque)).toBe(true);
+    expect(/'token',\s*trim\(p_token\)/.test(bloque)).toBe(true);
+    expect(/DROP FUNCTION IF EXISTS public\.resolver_sesion_valida\(text, text\);/.test(sql)).toBe(true);
+  });
+});

@@ -217,19 +217,22 @@ BEGIN
   END IF;
 
   RETURN jsonb_build_object(
-    'valida', true,
-    'usuarioId', v_ses.usuario_id,
-    'correo', v_ses.correo,
-    'rol', v_ses.rol,
-    'tituloRol', v_ses.titulo_rol,
-    'nombre', v_ses.nombre,
-    'esAdmin', v_ses.es_admin,
-    'esDocente', v_ses.es_docente,
-    'expiraEn', v_ses.expira_en,
-    'debeCambiarPassword', v_debe_cambiar
+    'ok', true,
+    'sesion', jsonb_build_object(
+      'token', trim(p_token),
+      'usuarioId', v_ses.usuario_id,
+      'correo', v_ses.correo,
+      'rol', v_ses.rol,
+      'tituloRol', v_ses.titulo_rol,
+      'nombre', v_ses.nombre,
+      'esAdmin', v_ses.es_admin,
+      'esDocente', v_ses.es_docente,
+      'expiraEn', v_ses.expira_en,
+      'debeCambiarPassword', v_debe_cambiar
+    )
   );
 EXCEPTION WHEN OTHERS THEN
-  RETURN jsonb_build_object('valida', false, 'error', SQLERRM);
+  RETURN jsonb_build_object('ok', false, 'error', SQLERRM);
 END;
 $$;
 

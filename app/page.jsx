@@ -207,6 +207,8 @@ export default function Registro() {
   // Submit Capitán
   const onSubmitCapitan = async (e) => {
     e.preventDefault();
+    if (pasoCapitan !== 4 || loading || resultado) return;
+    if (e.nativeEvent?.submitter && e.nativeEvent.submitter.getAttribute("type") !== "submit") return;
     setLoading(true);
     setMensaje("");
     setResultado(null);
@@ -241,6 +243,9 @@ export default function Registro() {
       });
 
       setResultado(res);
+      try {
+        if (sesion?.correo && res?.codigoAcceso) localStorage.setItem(`mecafut_codigo_capitan:${sesion.correo.trim().toLowerCase()}`, res.codigoAcceso);
+      } catch (_) { /* El registro sigue siendo válido si el navegador no permite almacenamiento. */ }
       setMensaje("¡Inscripción registrada con éxito!");
       guardarPerfil(obtenerSesionActual()?.correo, capitan);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -754,7 +759,17 @@ export default function Registro() {
           )}
 
           {/* FORMULARIO DE CAPITÁN */}
-          <form ref={capitanFormRef} onSubmit={onSubmitCapitan} className="space-y-6">
+          {!resultado && (
+            <form
+              ref={capitanFormRef}
+              onSubmit={onSubmitCapitan}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type !== "submit") {
+                  e.preventDefault();
+                }
+              }}
+              className="space-y-6"
+            >
             <ol className="wizard-steps" aria-label="Pasos para registrar un equipo">
               <li className="wizard-step" aria-current={pasoCapitan === 1 ? "step" : undefined}><span className="wizard-step__number">1</span>Equipo</li>
               <li className="wizard-step" aria-current={pasoCapitan === 2 ? "step" : undefined}><span className="wizard-step__number">2</span>Capitán</li>
@@ -1430,16 +1445,21 @@ export default function Registro() {
               ) : <span />}
               {pasoCapitan < 4 ? (
                 <button
+                  key="btn-siguiente-capitan"
                   type="button"
                   className="primary-action"
                   onClick={() => {
-                    if (capitanFormRef.current?.reportValidity()) setPasoCapitan((step) => step + 1);
+                    if (capitanFormRef.current?.reportValidity()) {
+                      setPasoCapitan((step) => step + 1);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }
                   }}
                 >
                   Siguiente
                 </button>
               ) : (
                 <button
+                  key="btn-registrar-capitan"
                   disabled={loading || (resumen && !resumen.inscripcionesAbiertas)}
                   type="submit"
                   className="primary-action"
@@ -1449,6 +1469,7 @@ export default function Registro() {
               )}
             </div>
           </form>
+          )}
         </div>
       )}
     </div>

@@ -41,6 +41,7 @@ export default function VerEquipo() {
     codigoClase: ""
   });
   const [guardandoJugador, setGuardandoJugador] = useState(false);
+  const [cargandoDocumento, setCargandoDocumento] = useState(false);
   const [mensajeJugador, setMensajeJugador] = useState("");
 
   // Modal para editar jugador (Capitán o Admin)
@@ -70,7 +71,41 @@ export default function VerEquipo() {
   const [maxJugadores, setMaxJugadores] = useState(CONFIG_TORNEO.plantilla.max);
 
   useEffect(() => {
-    const syncSesion = () => setSesion(obtenerSesionActual());
+    const recuperarCodigoCapitan = (correoUsuario) => {
+      if (!correoUsuario || typeof window === "undefined") return null;
+      try {
+        const correo = correoUsuario.trim().toLowerCase();
+        let cod = localStorage.getItem(`mecafut_codigo_capitan:${correo}`);
+        if (!cod) {
+          const raw = localStorage.getItem("mecafut_equipos");
+          if (raw) {
+            const equipos = JSON.parse(raw);
+            const eq = Array.isArray(equipos)
+              ? equipos.find((e) => !e.eliminado && e.capitan?.correo?.trim().toLowerCase() === correo)
+              : null;
+            if (eq?.codigoAcceso) {
+              cod = eq.codigoAcceso;
+              localStorage.setItem(`mecafut_codigo_capitan:${correo}`, cod);
+            }
+          }
+        }
+        return cod || null;
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const syncSesion = () => {
+      const s = obtenerSesionActual();
+      setSesion(s);
+      if (s?.correo) {
+        const codCap = recuperarCodigoCapitan(s.correo);
+        if (codCap) {
+          setCodigo((prev) => (prev ? prev : codCap));
+        }
+      }
+    };
+
     syncSesion();
     window.addEventListener("mecafut_auth_change", syncSesion);
 
@@ -109,6 +144,12 @@ export default function VerEquipo() {
       setJugadores(res.jugadores);
       setPermisos(res.permisos || {});
       setPermisoServidor(Boolean(res.permisos?.esCapitanOAdmin));
+      if (res.permisos?.esCapitan) {
+        try {
+          const correo = obtenerSesionActual()?.correo?.trim().toLowerCase();
+          if (correo) localStorage.setItem(`mecafut_codigo_capitan:${correo}`, cod.trim());
+        } catch (_) { /* La consulta sigue funcionando sin almacenamiento. */ }
+      }
       if (res.equipo?.whatsappCapitanesUrl) {
         setWhatsappCapitanesUrl(res.equipo.whatsappCapitanesUrl);
       }
@@ -184,6 +225,7 @@ export default function VerEquipo() {
         fotoDocumento: null,
         fotoDocumentoPreview: null,
         carrera: CONFIG_TORNEO.carreras[0],
+        nombreClase: "",
         codigoClase: ""
       });
     } catch (err) {
@@ -738,9 +780,56 @@ export default function VerEquipo() {
                     </div>
 
                     <div className="sm:col-span-2">
+                      <label htmlFor="new-member-document-type" className="block text-xs font-semibold text-gray-700 mb-1">Tipo de documento</label>
+                      <select
+                        id="new-member-document-type"
+                        value={nuevoJugador.tipoDocumento}
+                        onChange={e => setNuevoJugador(prev => ({ ...prev, tipoDocumento: e.target.value }))}
+                        className="w-full border border-gray-300 p-2 rounded-lg text-xs bg-white mb-2"
+                      >
+                        <option value="carnet">Carnet Universitario</option>
+                        <option value="hoja_confirmacion">Hoja de confirmación de matrícula</option>
+                      </select>
+                      <label htmlFor="new-member-document" className="block text-xs font-semibold text-gray-700 mb-1">
+                        Foto de carnet o matrícula (opcional por Capitán)
+                      </label>
+                      <input
+                        id="new-member-document"
+                        type="file"
+                        accept="image/*,.pdf"
+                        className="w-full text-xs text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-900 file:text-white hover:file:bg-blue-800 cursor-pointer"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) {
+                            setNuevoJugador(prev => ({ ...prev, fotoDocumento: null, fotoDocumentoPreview: null }));
+                            return;
+                          }
+                          setCargandoDocumento(true);
+                          try {
+                            const dataUrl = await comprimirDocumento(file);
+                            setNuevoJugador(prev => ({ ...prev, fotoDocumento: dataUrl, fotoDocumentoPreview: dataUrl }));
+                          } catch (_) {
+                            setNuevoJugador(prev => ({ ...prev, fotoDocumento: null, fotoDocumentoPreview: null }));
+                            setMensajeJugador("No se pudo procesar el documento. Intenta con otra imagen o PDF.");
+                          } finally {
+                            setCargandoDocumento(false);
+                          }
+                        }}
+                      />
+                      {cargandoDocumento && <span className="block mt-1 text-[11px] text-blue-700 font-medium">⏳ Comprimiendo documento...</span>}
+                      {nuevoJugador.fotoDocumentoPreview && !cargandoDocumento && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            ✓ Documento adjunto listo (quedará En revisión)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="sm:col-span-2">
                       <button
                         type="submit"
-                        disabled={guardandoJugador}
+                        disabled={guardandoJugador || cargandoDocumento}
                         className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-xs transition disabled:opacity-50 shadow-sm"
                       >
                         {guardandoJugador ? "Validando e incorporando..." : "Confirmar e Incorporar a la Plantilla"}

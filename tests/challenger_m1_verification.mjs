@@ -61,6 +61,10 @@ globalThis.window = {
 const dbService = await import('../lib/dbService.js');
 const torneoConfig = await import('../lib/torneoConfig.js');
 
+if (torneoConfig.CONFIG_TORNEO?.fechas) {
+  torneoConfig.CONFIG_TORNEO.fechas.finInscripciones = '2099-12-31T23:59:59-06:00';
+}
+
 const {
   esJugadorHabilitado,
   guardarConfiguracionGeneral,

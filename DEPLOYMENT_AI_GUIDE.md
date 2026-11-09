@@ -75,6 +75,15 @@ EMAILJS_PUBLIC_KEY=<public_key>
 EMAILJS_PRIVATE_KEY=<access_token_privado_emailjs>
 ```
 
+### Estado y diagnóstico del envío de OTP (2026-11-09)
+
+- Los proveedores personales de Outlook/Gmail usados anteriormente como origen de envío no son adecuados para el envío transaccional del portal: Outlook bloqueó la cuenta tras muy pocos mensajes OTP. No depender de buzones personales ni crear cuentas paralelas como solución permanente.
+- La Edge Function y el cliente alternan entre los servicios EmailJS `service_ar5incb` y `service_1cf52oc`. Ambos se configuraron en EmailJS para usar Mailjet; conservar esos IDs evita cambiar el código o desplegar Netlify solo por cambiar el proveedor conectado a un servicio existente. Si se cambia el ID que consume el código o sus variables de entorno, sí se requiere actualizar la configuración desplegada correspondiente.
+- El test de plantilla de EmailJS respondió `200 OK`; el registro de Mailjet mostró dos mensajes OTP como `Delivered`, sin rebotes ni bloqueos. El usuario confirmó que los correos estaban en Spam/Correo no deseado. `Delivered` confirma aceptación por el servidor receptor, no llegada a la bandeja principal.
+- La cuenta emisora observada usa una dirección Gmail sin dominio propio autenticado. Esto explica el riesgo de clasificación como spam y la configuración actual no garantiza llegada a Inbox. Siguiente mejora: usar un dominio controlado por el proyecto y autenticarlo en Mailjet con los registros DNS indicados por Mailjet (SPF y DKIM; configurar DMARC en el DNS del dominio), verificar el dominio y alinear el remitente `From` de la plantilla EmailJS con esa dirección. Mantener el `Reply-To` de contacto según corresponda.
+- Para diagnosticar futuros fallos, revisar en orden el historial de EmailJS y el evento de Mailjet (Delivered, deferred/retrying, bounced o blocked), después Spam/Promociones del destinatario. No interpretar una respuesta HTTP 200 ni `Delivered` como prueba de lectura o de llegada a Inbox.
+- La rotación entre servicios EmailJS no elimina límites ni bloqueos del proveedor por sí sola; Mailjet es el origen transaccional actual configurado, sujeto a sus límites y políticas. No guardar claves SMTP/API, claves privadas, OTP ni direcciones personales en esta documentación.
+
 ---
 
 ## 4. 🏆 Reglas Operativas del Torneo

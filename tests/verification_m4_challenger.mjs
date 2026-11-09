@@ -77,6 +77,10 @@ const {
   DOCENTES_AUTORIZADOS
 } = await import('../lib/torneoConfig.js');
 
+if (CONFIG_TORNEO?.fechas) {
+  CONFIG_TORNEO.fechas.finInscripciones = '2099-12-31T23:59:59-06:00';
+}
+
 const { verificarOtp } = await import('../lib/authService.js');
 
 const {

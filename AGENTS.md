@@ -66,10 +66,13 @@ flowchart TD
 
 ### Comandos de Verificación Local
 ```bash
-# Ejecutar suite E2E completa (Tiers 1 a 5 — 178 pruebas)
-node tests/e2e/runner.mjs
+# Limpiar caché y fragmentos huérfanos
+npm run clean
 
-# Compilar exportación estática para Netlify (carpeta out/)
+# Ejecutar suite E2E completa (Tiers 1 a 7 — 216 pruebas)
+npm test
+
+# Compilar exportación estática limpia para Netlify (carpeta out/)
 npm run build
 ```
 
@@ -96,15 +99,20 @@ npm run build
    - Está prohibido dar por finalizada una tarea de permisos modificando solo el frontend sin auditar y migrar la función SQL correspondiente (`public.es_admin_oficial`, `public.es_correo_admin`, etc.).
 
 3. **Higiene de Caché y Compilación Limpia:**
-   - Antes de cualquier prueba E2E o compilación de exportación estática, debe garantizarse la limpieza del directorio temporal `.next/` para evitar colisiones de fragmentos webpack (`Cannot find module './472.js'`).
+   - Antes de cualquier prueba E2E o compilación de exportación estática, debe garantizarse la purga del directorio temporal `.next/` y `out/` (`npm run clean`) para evitar colisiones de fragmentos webpack (`Cannot find module './472.js'`).
+   - El comando de build oficial siempre ejecuta una compilación fresca y verificable.
 
-4. **Transparencia en Errores de Autenticación y Restricciones de Seguridad:**
+4. **Resiliencia de Render en Autenticación Asíncrona:**
+   - Toda vista protegida debe mantener un estado neutro de carga (skeleton / spinner) mientras la sesión de autenticación y los roles estén en resolución (`cargando = true`).
+   - Prohibido renderizar banners de error de acceso o desloguear/redireccionar antes de que la promesa asíncrona de la sesión y las RPCs de permisos hayan retornado respuesta definitiva del backend.
+
+5. **Transparencia en Errores de Autenticación y Restricciones de Seguridad:**
    - La interfaz jamás debe enmascarar una regla de negocio legítima (ej. "Las cuentas de administrador no pueden resetear clave por OTP público") con un error genérico de fallo de conexión. Los mensajes deben ser explícitos y contrastados contra el estado real del servidor.
 
-5. **Compuerta de Preflight con Conexión Viva (Zero-Mock Preflight):**
+6. **Compuerta de Preflight con Conexión Viva (Zero-Mock Preflight):**
    - Antes de desplegar en Netlify, verificar que:
      a) Las migraciones SQL pendientes ya fueron aplicadas en el proyecto Supabase activo.
-     b) La suite de pruebas E2E aprueba al 100% (0 fallos).
+     b) La suite de pruebas E2E (Tiers 1 al 7 — 216 pruebas) aprueba al 100% (0 fallos).
      c) `npm run build` genera la carpeta `out/` sin errores de exportación estática.
      d) El usuario ha otorgado su confirmación explícita para el despliegue.
 

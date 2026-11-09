@@ -22,6 +22,16 @@ try {
   // If register is unavailable or already active, continue
 }
 
+// Asegurar que el periodo de inscripción esté abierto de forma determinista durante las pruebas E2E
+try {
+  const { CONFIG_TORNEO } = await import('../../lib/torneoConfig.js');
+  if (CONFIG_TORNEO?.fechas) {
+    CONFIG_TORNEO.fechas.finInscripciones = '2099-12-31T23:59:59-06:00';
+  }
+} catch (e) {
+  // Ignorar si no se puede importar en esta fase
+}
+
 // -------------------------------------------------------------
 // 2. Browser Environment Polyfill for Node.js (localStorage/window)
 // -------------------------------------------------------------

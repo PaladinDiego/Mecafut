@@ -145,7 +145,11 @@ Deno.serve(async (req: Request) => {
     if (!enviadoPor) {
       await supabase
         .from("auth_otps")
-        .update({ otp_hash: "", usado: true })
+        .update({
+          otp_hash: "",
+          usado: true,
+          ultimo_envio_en: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+        })
         .eq("correo", correo);
 
       return new Response(

@@ -399,6 +399,29 @@ describe('Tier 7: Estabilidad de Autorización Administrativa y Render Loop Fix'
       expect(fechaCierreVencida('2026-11-21', new Date('2026-11-22T05:59:58Z'))).toBe(false);
       expect(fechaCierreVencida('2026-11-21', new Date('2026-11-22T05:59:59Z'))).toBe(true);
     });
+
+    it('T7-G6-3: El flujo OTP evita falso cooldown en fallback, preserva errores reason y muestra la casilla en AuthGate', () => {
+      const m1802 = fs.readFileSync(path.join(projectRoot, 'supabase', 'migrations', '2026111802_fix_otp_fallback_cooldown_and_manual_preservation.sql'), 'utf8');
+      const edgeFn = fs.readFileSync(path.join(projectRoot, 'supabase', 'functions', 'mecafut-otp', 'index.ts'), 'utf8');
+      const authGate = fs.readFileSync(path.join(projectRoot, 'components', 'AuthGate.jsx'), 'utf8');
+      const authService = fs.readFileSync(path.join(projectRoot, 'lib', 'authService.js'), 'utf8');
+
+      expect(m1802).toContain("coalesce(v_prev.otp_hash, '') <> ''");
+      expect(m1802).toContain('NOT coalesce(v_prev.usado, false)');
+      expect(m1802).toContain("coalesce(v_otp.otp_hash, '') <> ''");
+      expect(m1802).toContain('NOT coalesce(v_otp.usado, false)');
+
+      expect(edgeFn).toContain('otp_hash: ""');
+      expect(edgeFn).toContain('usado: true');
+      expect(edgeFn).toContain('ultimo_envio_en:');
+
+      expect(authService).toContain('OTP_COOLDOWN');
+      expect(authService).toContain('OTP_MANUAL_ONLY');
+
+      expect(authGate).toContain('if (esCooldown || esManualOnly)');
+      expect(authGate).toContain('handleTengoCodigo');
+      expect(authGate).toContain('id="verification-code"');
+    });
   });
 
 });

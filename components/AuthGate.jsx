@@ -125,10 +125,45 @@ export default function AuthGate({ children }) {
       setOtpInfo(res);
       setPaso(2);
     } catch (err) {
-      setErrorLogin(err.message || "Error al solicitar código OTP");
+      const msg = err?.message || "Error al solicitar código OTP";
+      const esManualOnly = err?.code === "OTP_MANUAL_ONLY" || err?.reason === "manual_only";
+      const esCooldown =
+        err?.code === "OTP_COOLDOWN" ||
+        err?.reason === "cooldown" ||
+        msg.includes("Ya se envió un código recientemente") ||
+        msg.includes("45 segundos");
+
+      if (esCooldown || esManualOnly) {
+        setErrorLogin("");
+        setOtpInfo({
+          correo: correo.trim().toLowerCase(),
+          modoEnvio: esManualOnly ? "manual" : "reciente",
+          expiraEnMinutos: 10,
+          aviso: msg
+        });
+        setPaso(2);
+      } else {
+        setErrorLogin(msg);
+      }
     } finally {
       setLoadingLogin(false);
     }
+  };
+
+  const handleTengoCodigo = () => {
+    const correoLimpio = correo.trim().toLowerCase();
+    const dominioValido = correoLimpio.endsWith("@unitec.edu") || correoLimpio.endsWith("@unitec.edu.hn");
+    if (!dominioValido || correoLimpio.split("@").length !== 2) {
+      setErrorLogin("Ingresa primero tu correo institucional (@unitec.edu o @unitec.edu.hn).");
+      return;
+    }
+    setErrorLogin("");
+    setOtpInfo({
+      correo: correoLimpio,
+      modoEnvio: "manual",
+      expiraEnMinutos: 10
+    });
+    setPaso(2);
   };
 
   const handleLogin = async (e) => {
@@ -413,13 +448,33 @@ export default function AuthGate({ children }) {
               >
                 {loadingLogin ? "Generando código..." : "Enviar Código de Verificación OTP →"}
               </button>
+
+              <button
+                type="button"
+                disabled={loadingLogin}
+                onClick={handleTengoCodigo}
+                className="w-full border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-blue-950 font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+              >
+                ¿Ya tienes un código de verificación? Ingresarlo aquí →
+              </button>
             </form>
           ) : (
             <form onSubmit={handleVerificarCodigo} className="space-y-4 text-left">
-              <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-center" role="status">
-                <span className="text-xs text-emerald-900 font-semibold block">
-                  {otpInfo?.modoEnvio === "servidor" || otpInfo?.modoEnvio === "email"
+              <div
+                className={`p-3 rounded-xl text-center border ${
+                  otpInfo?.aviso
+                    ? "bg-amber-50 border-amber-200"
+                    : "bg-emerald-50 border-emerald-200"
+                }`}
+                role="status"
+              >
+                <span className={`text-xs font-semibold block ${otpInfo?.aviso ? "text-amber-950" : "text-emerald-900"}`}>
+                  {otpInfo?.aviso
+                    ? `${otpInfo.aviso} Si ya recibiste tu código para ${correo}, ingrésalo abajo.`
+                    : otpInfo?.modoEnvio === "servidor" || otpInfo?.modoEnvio === "email"
                     ? `¡Código enviado a tu buzón institucional ${correo}!`
+                    : otpInfo?.modoEnvio === "manual"
+                    ? `Ingresa el código de 6 dígitos emitido para ${correo}.`
                     : `Código OTP enviado a ${correo}`}
                 </span>
               </div>

@@ -1,5 +1,7 @@
 # 🚀 DEPLOYMENT_AI_GUIDE.md — Guía Técnica Integral de Arquitectura y Despliegue
 
+> **Aviso para el parche del 17-11-2026:** usa primero la [nota del parche y guía de despliegue seguro](./docs/notas-parche-admin-otp-y-deploy-seguro-2026-11-17.md). Esta guía conserva pasos y referencias históricos que no se han reconciliado con el historial remoto de migraciones, el contexto Netlify activo ni el contrato actual del panel. No tomes su estado de producción como verificación vigente.
+
 > **ESTADO DE PRODUCCIÓN:** 🟢 **ACTIVO Y PUBLICADO**  
 > **URL Oficial:** [https://mecafut-2026.netlify.app/](https://mecafut-2026.netlify.app/)  
 > **Backend & Base de Datos:** Supabase PostgreSQL (`kqwcbhyevlftmgvbacln` / `us-east-1`) + Edge Function `mecafut-otp`  

@@ -66,7 +66,8 @@ Deno.serve(async (req: Request) => {
     if (rpcErr || !regData?.ok) {
       const isCooldown = regData?.reason === "cooldown";
       const isInvalidDomain = regData?.reason === "invalid_domain";
-      const status = isCooldown ? 429 : (isInvalidDomain ? 400 : 500);
+      const isManualOnly = regData?.reason === "manual_only";
+      const status = isCooldown ? 429 : (isInvalidDomain ? 400 : (isManualOnly ? 409 : 500));
 
       return new Response(
         JSON.stringify({

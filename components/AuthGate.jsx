@@ -6,12 +6,15 @@ import {
   crearCuentaConOtp,
   recuperarPasswordConOtp,
   cambiarPasswordObligatorio,
-  iniciarSesionConPassword
+  iniciarSesionConPassword,
+  verificarAccesoAdmin,
+  cerrarSesion
 } from "../lib/authService";
 import {
   obtenerPerfilPendienteJugador,
   actualizarDocumentoJugador,
   comprimirDocumento,
+  obtenerEstadoMantenimiento,
   isSupabaseConfigured
 } from "../lib/dbService";
 import { isProductionConfigMissing } from "../lib/supabase";
@@ -20,6 +23,8 @@ import BrandMark from "./BrandMark";
 export default function AuthGate({ children }) {
   const [sesion, setSesion] = useState(null);
   const [cargandoSesion, setCargandoSesion] = useState(true);
+  const [estadoMantenimiento, setEstadoMantenimiento] = useState(null);
+  const [mostrarAccesoAdmin, setMostrarAccesoAdmin] = useState(false);
 
   // Estados del Formulario de Inicio de Sesión Obligatorio
   const [paso, setPaso] = useState(1);
@@ -61,6 +66,21 @@ export default function AuthGate({ children }) {
     const s = obtenerSesionActual();
     setSesion(s);
 
+    let mantenimientoActual;
+    try {
+      mantenimientoActual = await obtenerEstadoMantenimiento(s?.token);
+      setEstadoMantenimiento(mantenimientoActual);
+    } catch (err) {
+      mantenimientoActual = { activo: true, puedeAcceder: false, error: err.message };
+      setEstadoMantenimiento(mantenimientoActual);
+    }
+
+    if (mantenimientoActual.activo && !verificarAccesoAdmin(s)) {
+      setPerfilIncompleto(null);
+      setCargandoSesion(false);
+      return;
+    }
+
     if (s && s.correo) {
       try {
         const pendiente = await obtenerPerfilPendienteJugador(s.correo);
@@ -78,6 +98,22 @@ export default function AuthGate({ children }) {
     }
     setCargandoSesion(false);
   };
+
+  useEffect(() => {
+    const actualizarMantenimiento = async () => {
+      try {
+        setEstadoMantenimiento(await obtenerEstadoMantenimiento(sesion?.token));
+      } catch (err) {
+        setEstadoMantenimiento({ activo: true, puedeAcceder: false, error: err.message });
+      }
+    };
+    const timer = window.setInterval(actualizarMantenimiento, 15000);
+    window.addEventListener("focus", actualizarMantenimiento);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", actualizarMantenimiento);
+    };
+  }, [sesion?.token]);
 
   const handleSolicitarCodigo = async (e) => {
     e.preventDefault();
@@ -102,6 +138,11 @@ export default function AuthGate({ children }) {
     try {
       const { sesion: nuevaSesion } = await iniciarSesionConPassword(correo, password);
       setSesion(nuevaSesion);
+      try {
+        setEstadoMantenimiento(await obtenerEstadoMantenimiento(nuevaSesion?.token));
+      } catch (err) {
+        setEstadoMantenimiento({ activo: true, puedeAcceder: false, error: err.message });
+      }
       setCorreo("");
       setPassword("");
     } catch (err) {
@@ -226,6 +267,31 @@ export default function AuthGate({ children }) {
           <div className="w-8 h-8 border-4 border-blue-900 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p className="text-xs text-gray-500 font-semibold">Cargando plataforma MECAFUT...</p>
         </div>
+      </div>
+    );
+  }
+
+  const mantenimientoBloquea = estadoMantenimiento?.activo && !verificarAccesoAdmin(sesion);
+  if (mantenimientoBloquea && (sesion || !mostrarAccesoAdmin)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950">
+        <section className="max-w-lg w-full rounded-3xl bg-white p-8 text-center shadow-2xl" role="status" aria-live="polite">
+          <BrandMark className="mx-auto mb-5" />
+          <p className="page-kicker">MECAFUT · UNITEC</p>
+          <h1 className="text-2xl font-black text-blue-950">Plataforma en mantenimiento</h1>
+          <p className="mt-3 text-sm text-gray-600">Estamos realizando ajustes. Intenta nuevamente más tarde.</p>
+          {estadoMantenimiento?.error && <p className="mt-3 text-xs text-red-700">No se pudo consultar el estado del sitio. Reintenta en unos momentos.</p>}
+          {sesion && (
+            <button type="button" onClick={() => { cerrarSesion(); setSesion(null); }} className="mt-5 text-xs font-bold text-gray-600 underline">
+              Cerrar sesión
+            </button>
+          )}
+          {!sesion && (
+            <button type="button" onClick={() => setMostrarAccesoAdmin(true)} className="mt-5 block w-full rounded-xl bg-blue-950 py-3 text-sm font-bold text-white">
+              Acceso de administrador
+            </button>
+          )}
+        </section>
       </div>
     );
   }

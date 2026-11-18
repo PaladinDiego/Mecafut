@@ -69,6 +69,7 @@ export default function VerEquipo() {
   const [visorModal, setVisorModal] = useState(null);
   const [whatsappCapitanesUrl, setWhatsappCapitanesUrl] = useState(CONFIG_TORNEO.whatsappCapitanesUrl);
   const [maxJugadores, setMaxJugadores] = useState(CONFIG_TORNEO.plantilla.max);
+  const [inscripcionesAbiertas, setInscripcionesAbiertas] = useState(true);
 
   useEffect(() => {
     const recuperarCodigoCapitan = (correoUsuario) => {
@@ -115,6 +116,9 @@ export default function VerEquipo() {
       }
       if (res?.maxJugadoresPorEquipo) {
         setMaxJugadores(res.maxJugadoresPorEquipo);
+      }
+      if (typeof res?.inscripcionesAbiertas === "boolean") {
+        setInscripcionesAbiertas(res.inscripcionesAbiertas);
       }
     }).catch(() => {});
 
@@ -296,6 +300,7 @@ export default function VerEquipo() {
     permisoServidor ||
     (sesion && (sesion.rol === "admin" || (equipo?.capitan?.correo && sesion.correo?.toLowerCase() === equipo.capitan.correo?.toLowerCase())))
   );
+  const esAdmin = Boolean(permisos?.esAdmin || sesion?.rol === "admin" || sesion?.esAdmin);
   const jugadoresConCarnet = jugadores.filter(esJugadorHabilitado);
   const jugadoresEnRevision = jugadores.filter(j => obtenerEstadoCarnet(j) === "en_revision");
 
@@ -677,8 +682,14 @@ export default function VerEquipo() {
             </div>
           )}
 
+          {!inscripcionesAbiertas && !esAdmin && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-950" role="status">
+              El periodo de inscripción cerró. Puedes corregir los datos de los integrantes existentes; agregar o quitar integrantes está deshabilitado.
+            </div>
+          )}
+
           {/* Acción para agregar jugador si hay cupo (Capitán o Admin) */}
-          {jugadores.length < CONFIG_TORNEO.plantilla.max && equipo.estado !== "Rechazado" && (
+          {(inscripcionesAbiertas || esAdmin) && jugadores.length < CONFIG_TORNEO.plantilla.max && equipo.estado !== "Rechazado" && (
             esCapitanOAdmin ? (
               <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-4">
                 <div className="flex flex-wrap justify-between items-center gap-2">
@@ -920,7 +931,10 @@ export default function VerEquipo() {
                     const tieneCarnetVisible = Boolean(j.fotoDocumento || j.foto_documento);
                     const tieneFotoEnServidor = Boolean(tieneCarnetVisible || j.tieneFoto);
                     const esDocente = estadoCarnet === "exento_docente" || (j.correoVerificado !== false && esDocenteAutorizado(j.correo));
-                    const esPropioJugador = Boolean(sesion?.correo && j.correo && sesion.correo.toLowerCase() === j.correo.toLowerCase());
+                    const esPropioJugador = Boolean(
+                      (sesion?.correo && j.correo && sesion.correo.toLowerCase() === j.correo.toLowerCase()) ||
+                      (sesion?.usuarioId && (j.usuarioId || j.usuario_id) && sesion.usuarioId === (j.usuarioId || j.usuario_id))
+                    );
 
                     return (
                       <tr key={j.id || i} className={`hover:bg-gray-50 ${j.esCapitan ? "bg-blue-50/40 font-semibold" : ""}`}>
@@ -982,7 +996,7 @@ export default function VerEquipo() {
                               </span>
                             ) : null}
 
-                            {(esCapitanOAdmin || esPropioJugador) && !esDocente && (
+                            {(esCapitanOAdmin || (esPropioJugador && !inscripcionesAbiertas)) && !esDocente && (
                               <button
                                 type="button"
                                 onClick={() => abrirModalCarnet(j)}
@@ -1000,7 +1014,7 @@ export default function VerEquipo() {
                           )}
                         </td>
                         <td className="p-3 text-center">
-                          {esCapitanOAdmin ? (
+                          {esCapitanOAdmin || (esPropioJugador && !inscripcionesAbiertas) ? (
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
@@ -1011,7 +1025,7 @@ export default function VerEquipo() {
                                 <span>✏️</span>
                                 <span>Editar</span>
                               </button>
-                              {!j.esCapitan && (
+                              {!j.esCapitan && (esAdmin || (inscripcionesAbiertas && permisos?.esCapitan)) && (
                                 <button
                                   type="button"
                                   onClick={() => handleExpulsarJugador(j)}

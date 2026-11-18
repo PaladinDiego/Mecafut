@@ -14,20 +14,18 @@ export default function RootLayout({ children }) {
   return (
     <html lang="es">
       <body className="app-body min-h-screen text-gray-900 flex flex-col justify-between">
-        <ReglamentoModal />
-        <DialogAccessibility />
-        <Navbar />
-        <ToastMessages />
-
-        <main className="flex-1">
-          <AuthGate>
+        <AuthGate>
+          <ReglamentoModal />
+          <DialogAccessibility />
+          <Navbar />
+          <ToastMessages />
+          <main className="flex-1">
             {children}
-          </AuthGate>
-        </main>
-
-        <footer className="site-footer">
-          <p>Mecafut Forms © 2026 — Plataforma Oficial Torneo de Fútbol Ingeniería Mecatrónica</p>
-        </footer>
+          </main>
+          <footer className="site-footer">
+            <p>Mecafut Forms © 2026 — Plataforma Oficial Torneo de Fútbol Ingeniería Mecatrónica</p>
+          </footer>
+        </AuthGate>
       </body>
     </html>
   );

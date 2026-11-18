@@ -19,7 +19,9 @@ import {
   COMITE_ADMIN_USERNAMES,
   esAdminAutorizado,
   esDocenteAutorizado,
-  obtenerDocentePorCorreo
+  obtenerDocentePorCorreo,
+  fechaCierreParaInput,
+  fechaCierreVencida
 } from '../../lib/torneoConfig.js';
 
 import {
@@ -40,39 +42,44 @@ describe('Tier 7: Estabilidad de Autorización Administrativa y Render Loop Fix'
   });
 
   // --------------------------------------------------------------------------
-  // Grupo 1: Cobertura Completa de los 11 Administradores en Ambos Dominios
+  // Grupo 1: Cobertura Completa de los 5 Administradores Principales en Ambos Dominios
   // --------------------------------------------------------------------------
-  describe('Grupo 1: Cobertura Dual-Domain de los 11 Administradores del Comité', () => {
-    const comiteEsperado = [
+  describe('Grupo 1: Cobertura Dual-Domain de los 5 Administradores Principales', () => {
+    const principalesEsperados = [
       'andresvalle',
       'carlos.rubi',
+      'cesar_lopez',
       'juan.mejia',
-      'cristhyan.rivera',
+      'cristhyan.rivera'
+    ];
+    const delegadosEsperados = [
       'joserodasgodoy',
       'c.marcelo.al',
-      'cesar_lopez',
       'adioyuela',
       'maria_giron',
       'dereck.beltrand',
       'jalfaro'
     ];
 
-    it('T7-G1-1: COMITE_ADMIN_USERNAMES contiene exactamente los 11 miembros del comité oficial', () => {
-      expect(COMITE_ADMIN_USERNAMES.length).toBe(11);
-      comiteEsperado.forEach((usuario) => {
+    it('T7-G1-1: COMITE_ADMIN_USERNAMES contiene exactamente los 5 administradores principales', () => {
+      expect(COMITE_ADMIN_USERNAMES.length).toBe(5);
+      principalesEsperados.forEach((usuario) => {
         expect(COMITE_ADMIN_USERNAMES).toContain(usuario);
+      });
+      delegadosEsperados.forEach((usuario) => {
+        expect(COMITE_ADMIN_USERNAMES.includes(usuario)).toBe(false);
       });
     });
 
-    it('T7-G1-2: Todos los 11 administradores son autorizados bajo @unitec.edu', () => {
-      comiteEsperado.forEach((usuario) => {
+    it('T7-G1-2: Todos los 5 administradores principales son autorizados bajo @unitec.edu', () => {
+      principalesEsperados.forEach((usuario) => {
         const correo = `${usuario}@unitec.edu`;
         expect(esAdminAutorizado(correo)).toBe(true);
       });
     });
 
-    it('T7-G1-3: Todos los 11 administradores son autorizados bajo @unitec.edu.hn (incluyendo andresvalle)', () => {
-      comiteEsperado.forEach((usuario) => {
+    it('T7-G1-3: Todos los 5 administradores principales son autorizados bajo @unitec.edu.hn (incluyendo andresvalle)', () => {
+      principalesEsperados.forEach((usuario) => {
         const correo = `${usuario}@unitec.edu.hn`;
         expect(esAdminAutorizado(correo)).toBe(true);
       });
@@ -87,8 +94,8 @@ describe('Tier 7: Estabilidad de Autorización Administrativa y Render Loop Fix'
       expect(esAdminAutorizado('  andresvalle@unitec.edu.hn  ')).toBe(true);
     });
 
-    it('T7-G1-5: CONFIG_TORNEO.admins incluye explícitamente ambas variantes de dominio para cada administrador', () => {
-      comiteEsperado.forEach((u) => {
+    it('T7-G1-5: CONFIG_TORNEO.admins incluye explícitamente ambas variantes de dominio para cada admin principal', () => {
+      principalesEsperados.forEach((u) => {
         expect(CONFIG_TORNEO.admins).toContain(`${u}@unitec.edu`);
         expect(CONFIG_TORNEO.admins).toContain(`${u}@unitec.edu.hn`);
       });
@@ -359,6 +366,38 @@ describe('Tier 7: Estabilidad de Autorización Administrativa y Render Loop Fix'
       expect(sesion2.correo).toBe(sesion1.correo);
       expect(sesion2.rol).toBe('admin');
       expect(sesion2.esAdmin).toBe(true);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Grupo 6: Contratos del Parche 2026-11-17 (Roles, OTP Manual, Mantenimiento, Cierre)
+  // --------------------------------------------------------------------------
+  describe('Grupo 6: Contratos SQL y Horario Local del Parche 2026-11-17', () => {
+    it('T7-G6-1: Las migraciones 2026111601, 2026111701 y 2026111801 mantienen paridad de sesión dual y firmas únicas', () => {
+      const m16 = fs.readFileSync(path.join(projectRoot, 'supabase', 'migrations', '2026111601_admin_payload_on_demand.sql'), 'utf8');
+      const m17 = fs.readFileSync(path.join(projectRoot, 'supabase', 'migrations', '2026111701_admin_roles_and_manual_otp.sql'), 'utf8');
+      const m18 = fs.readFileSync(path.join(projectRoot, 'supabase', 'migrations', '2026111801_maintenance_deadline_and_post_close_edits.sql'), 'utf8');
+
+      expect(m16).toContain('rpc_obtener_datos_admin_v2');
+      expect(m16).toContain('rpc_obtener_usuarios_admin');
+      expect(m16).toContain('rpc_obtener_documento_admin');
+
+      expect(m17).toContain('v_usuario text;');
+      expect(m17).toContain('CREATE OR REPLACE FUNCTION public.rpc_guardar_configuracion_general(\n  p_token text,\n  p_actualizaciones jsonb');
+      expect(m17).toContain('rpc_emitir_otp_manual_admin');
+      expect(m17).toContain('rpc_configurar_admin');
+
+      expect(m18).toContain('token = v_raw OR token = v_hash');
+      expect(m18).toContain('s.token = trim(p_token) OR s.token = encode');
+      expect(m18).toContain('CREATE OR REPLACE FUNCTION public.rpc_guardar_configuracion_general(\n  p_token text,\n  p_actualizaciones jsonb');
+      expect(m18).toContain('otpAutomaticoHabilitado');
+    });
+
+    it('T7-G6-2: fechaCierreParaInput y fechaCierreVencida interpretan fechas heredadas e instantes UTC en hora de Tegucigalpa', () => {
+      expect(fechaCierreParaInput('2026-11-21')).toBe('2026-11-21T23:59');
+      expect(fechaCierreParaInput('2026-11-22T05:59:59Z')).toBe('2026-11-21T23:59');
+      expect(fechaCierreVencida('2026-11-21', new Date('2026-11-22T05:59:58Z'))).toBe(false);
+      expect(fechaCierreVencida('2026-11-21', new Date('2026-11-22T05:59:59Z'))).toBe(true);
     });
   });
 

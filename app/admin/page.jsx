@@ -1,7 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   obtenerDatosAdmin,
+  obtenerUsuariosAdmin,
+  obtenerDocumentoAdmin,
   actualizarEstadoEquipo,
   eliminarEquipoAdmin,
   cambiarEstadoInscripciones,
@@ -16,20 +18,22 @@ import {
   comprimirDocumento,
   actualizarEnlaceWhatsapp,
   guardarConfiguracionGeneral,
+  actualizarRolAdmin,
   esJugadorHabilitado,
   obtenerEstadoCarnet,
   isSupabaseConfigured
 } from "../../lib/dbService";
 import { exportarExcelOficial, exportarPDFPlanillas } from "../../lib/exportUtils";
 import { notifyUser } from "../../lib/uiFeedback";
-import { CONFIG_TORNEO, esDocenteAutorizado, esAdminAutorizado } from "../../lib/torneoConfig";
+import { CONFIG_TORNEO, esDocenteAutorizado, esAdminAutorizado, fechaCierreParaInput } from "../../lib/torneoConfig";
 import { ClipboardList, GitBranch, Radio, Settings, Shield, Users } from "lucide-react";
 import {
   obtenerSesionActual,
   verificarOtp,
   verificarSesionServidor,
   verificarAccesoAdmin,
-  generarPasswordTemporalAdmin
+  generarPasswordTemporalAdmin,
+  emitirOtpManualAdmin
 } from "../../lib/authService";
 import {
   generarBracketEliminacion,
@@ -81,6 +85,10 @@ export default function Admin() {
   const [modo, setModo] = useState("simulado");
   const [visorModal, setVisorModal] = useState(null);
   const [revisandoId, setRevisandoId] = useState(null);
+  const [usuariosCargados, setUsuariosCargados] = useState(false);
+  const [cargandoUsuarios, setCargandoUsuarios] = useState(false);
+  const solicitudDocumentoRef = useRef(0);
+  const solicitudCarnetRef = useRef(0);
 
   // Estados para Usuarios y Seguridad
   const [usuarios, setUsuarios] = useState([]);
@@ -88,13 +96,20 @@ export default function Admin() {
   const [modalTempPassword, setModalTempPassword] = useState(null);
   const [generandoTempPassword, setGenerandoTempPassword] = useState(false);
   const [modalHistorialUsuario, setModalHistorialUsuario] = useState(null);
+  const [correoAdminInput, setCorreoAdminInput] = useState("");
+  const [correoOtpManualInput, setCorreoOtpManualInput] = useState("");
+  const [actualizandoRolAdmin, setActualizandoRolAdmin] = useState(false);
+  const [emitiendoOtpManual, setEmitiendoOtpManual] = useState(false);
+  const [modalOtpManual, setModalOtpManual] = useState(null);
 
   // Estados para Configuración Operativa (Ocultos por defecto hasta que el comité decida publicarlos)
   const [cfgMaxJugadores, setCfgMaxJugadores] = useState(15);
   const [cfgFechaCierre, setCfgFechaCierre] = useState("");
+  const [cfgMantenimientoActivo, setCfgMantenimientoActivo] = useState(false);
   const [cfgPublicarGoleadores, setCfgPublicarGoleadores] = useState(false);
   const [cfgPublicarClasificacion, setCfgPublicarClasificacion] = useState(false);
   const [cfgPublicarPremios, setCfgPublicarPremios] = useState(false);
+  const [cfgOtpAutomaticoHabilitado, setCfgOtpAutomaticoHabilitado] = useState(true);
   const [guardandoConfig, setGuardandoConfig] = useState(false);
   const [mensajeConfig, setMensajeConfig] = useState(null);
 
@@ -126,6 +141,7 @@ export default function Admin() {
   const [modalCarnetJugador, setModalCarnetJugador] = useState(null);
   const [carnetDataUrl, setCarnetDataUrl] = useState(null);
   const [subiendoCarnet, setSubiendoCarnet] = useState(false);
+  const [cargandoCarnetActual, setCargandoCarnetActual] = useState(false);
   const [carnetError, setCarnetError] = useState("");
 
   // F12: Estados para Modal de Armado Manual de Llaves
@@ -226,15 +242,20 @@ export default function Admin() {
       const data = await obtenerDatosAdmin();
       setJugadores(data.jugadores || []);
       setEquipos(data.equipos || []);
-      setUsuarios(data.usuarios || []);
+      if (data.modo !== "supabase") {
+        setUsuarios(data.usuarios || []);
+        setUsuariosCargados(true);
+      }
       setHistorial(data.historial || []);
       const cfg = data.configuracion || { inscripcionesAbiertas: true };
       setConfiguracion(cfg);
       setCfgMaxJugadores(cfg.maxJugadoresPorEquipo || 15);
-      setCfgFechaCierre(cfg.fechaCierreInscripciones ? cfg.fechaCierreInscripciones.slice(0, 10) : "");
+      setCfgFechaCierre(fechaCierreParaInput(cfg.fechaCierreInscripciones));
+      setCfgMantenimientoActivo(Boolean(cfg.mantenimientoActivo));
       setCfgPublicarGoleadores(Boolean(cfg.publicarGoleadores));
       setCfgPublicarClasificacion(Boolean(cfg.publicarClasificacion));
       setCfgPublicarPremios(Boolean(cfg.publicarPremios));
+      setCfgOtpAutomaticoHabilitado(cfg.otpAutomaticoHabilitado !== false);
       if (cfg.whatsappCapitanesUrl) {
         setUrlWhatsappInput(cfg.whatsappCapitanesUrl);
       }
@@ -245,6 +266,50 @@ export default function Admin() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const cargarUsuarios = async () => {
+    if (usuariosCargados || cargandoUsuarios) return;
+    setCargandoUsuarios(true);
+    try {
+      const data = await obtenerUsuariosAdmin();
+      setUsuarios(data || []);
+      setUsuariosCargados(true);
+    } catch (err) {
+      notifyUser("Error al cargar usuarios: " + err.message);
+    } finally {
+      setCargandoUsuarios(false);
+    }
+  };
+
+  const cambiarPestana = (key) => {
+    setPestanaActiva(key);
+    if (key === "usuarios") cargarUsuarios();
+  };
+
+  const abrirVisorDocumento = async ({ tipoDocumento, registroId, ...datosVisor }) => {
+    const solicitud = ++solicitudDocumentoRef.current;
+    setVisorModal({ ...datosVisor, solicitud, url: null, cargando: true, error: null });
+
+    try {
+      const url = await obtenerDocumentoAdmin(tipoDocumento, registroId);
+      if (solicitudDocumentoRef.current === solicitud) {
+        setVisorModal((actual) => actual?.solicitud === solicitud
+          ? { ...actual, url, cargando: false }
+          : actual);
+      }
+    } catch (err) {
+      if (solicitudDocumentoRef.current === solicitud) {
+        setVisorModal((actual) => actual?.solicitud === solicitud
+          ? { ...actual, cargando: false, error: err.message }
+          : actual);
+      }
+    }
+  };
+
+  const cerrarVisorDocumento = () => {
+    solicitudDocumentoRef.current += 1;
+    setVisorModal(null);
   };
 
   const handleCambiarEstado = async (equipoId, nuevoEstado) => {
@@ -314,28 +379,64 @@ export default function Admin() {
   // ========================================================
   // F10: GESTIÓN DE CARNETS Y MATRÍCULAS EN EL PADRÓN
   // ========================================================
-  const abrirModalCarnet = (jugador) => {
+  const abrirModalCarnet = async (jugador) => {
+    const solicitud = ++solicitudCarnetRef.current;
     setModalCarnetJugador(jugador);
-    setCarnetDataUrl(jugador.fotoDocumento || jugador.foto_documento || null);
+    setSubiendoCarnet(false);
+    const urlActual = jugador.fotoDocumento || jugador.foto_documento || null;
+    setCarnetDataUrl(urlActual);
     setCarnetError("");
+
+    if (urlActual || !jugador.tieneFoto) {
+      setCargandoCarnetActual(false);
+      return;
+    }
+
+    setCargandoCarnetActual(true);
+    try {
+      const url = await obtenerDocumentoAdmin("carnet", jugador.id);
+      if (solicitudCarnetRef.current !== solicitud) return;
+      setCarnetDataUrl(url);
+      if (!url) setCarnetError("No se encontró el archivo de carnet registrado.");
+    } catch (err) {
+      if (solicitudCarnetRef.current === solicitud) {
+        setCarnetError("No se pudo cargar el carnet actual: " + err.message);
+      }
+    } finally {
+      if (solicitudCarnetRef.current === solicitud) setCargandoCarnetActual(false);
+    }
+  };
+
+  const cerrarModalCarnet = () => {
+    solicitudCarnetRef.current += 1;
+    setCargandoCarnetActual(false);
+    setSubiendoCarnet(false);
+    setModalCarnetJugador(null);
+    setCarnetDataUrl(null);
   };
 
   const handleArchivoCarnetChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    solicitudCarnetRef.current += 1;
+    const solicitud = solicitudCarnetRef.current;
+    setCargandoCarnetActual(false);
     setSubiendoCarnet(true);
     setCarnetError("");
     try {
       const dataUrl = await comprimirDocumento(file);
+      if (solicitudCarnetRef.current !== solicitud) return;
       if (!dataUrl) {
         setCarnetError("No se pudo procesar la imagen o documento. Intenta con otro archivo.");
       } else {
         setCarnetDataUrl(dataUrl);
       }
     } catch (err) {
-      setCarnetError("Error al procesar el archivo: " + err.message);
+      if (solicitudCarnetRef.current === solicitud) {
+        setCarnetError("Error al procesar el archivo: " + err.message);
+      }
     } finally {
-      setSubiendoCarnet(false);
+      if (solicitudCarnetRef.current === solicitud) setSubiendoCarnet(false);
     }
   };
 
@@ -357,19 +458,22 @@ export default function Admin() {
       setJugadores((prev) =>
         prev.map((j) =>
           j.id === modalCarnetJugador.id
-            ? {
-                ...j,
-                fotoDocumento: carnetDataUrl,
-                foto_documento: carnetDataUrl,
-                estado: "Aprobado"
-              }
+            ? modo === "supabase"
+              ? { ...j, tieneFoto: true, estadoCarnet: "verificado", estado: "Aprobado" }
+              : {
+                  ...j,
+                  tieneFoto: true,
+                  fotoDocumento: carnetDataUrl,
+                  foto_documento: carnetDataUrl,
+                  estadoCarnet: "verificado",
+                  estado: "Aprobado"
+                }
             : j
         )
       );
       setEquipos((prev) => [...prev]);
       notifyUser(`¡Carnet de ${modalCarnetJugador.nombre} actualizado y verificado con éxito!`);
-      setModalCarnetJugador(null);
-      setCarnetDataUrl(null);
+      cerrarModalCarnet();
     } catch (err) {
       notifyUser("Error guardando carnet: " + err.message);
     } finally {
@@ -407,7 +511,7 @@ export default function Admin() {
         )
       );
       if (visorModal?.jugador?.id === jugador.id) {
-        setVisorModal(null);
+        cerrarVisorDocumento();
       }
     } catch (err) {
       notifyUser("Error al revisar carnet: " + err.message);
@@ -436,11 +540,63 @@ export default function Admin() {
         correo: u.correo,
         tempPassword: res.tempPassword
       });
-      fetchData();
+      setUsuarios((prev) => prev.map((usuario) => usuario.id === u.id
+        ? { ...usuario, debe_cambiar_password: true, debeCambiarPassword: true }
+        : usuario));
     } catch (err) {
       notifyUser("Error al generar contraseña temporal: " + err.message);
     } finally {
       setGenerandoTempPassword(false);
+    }
+  };
+
+  const handleCambiarRolAdmin = async (correoIngresado, habilitar) => {
+    const correo = String(correoIngresado || "").trim().toLowerCase();
+    if (!sesionActual?.esAdminPrincipal || !correo) return;
+    if (esAdminAutorizado(correo)) {
+      notifyUser("Las cuentas principales están protegidas y no se pueden cambiar desde aquí.");
+      return;
+    }
+    const accion = habilitar ? "conceder" : "retirar";
+    if (!confirm(`¿Deseas ${accion} el rol de administrador a ${correo}?`)) return;
+
+    setActualizandoRolAdmin(true);
+    try {
+      await actualizarRolAdmin(correo, habilitar);
+      setUsuarios((prev) => prev.map((usuario) => {
+        if ((usuario.correo || "").toLowerCase() !== correo) return usuario;
+        const esAdmin = Boolean(habilitar);
+        return {
+          ...usuario,
+          esAdmin,
+          rol: esAdmin ? "admin" : (usuario.esDocente ? "docente" : "jugador")
+        };
+      }));
+      if (correoAdminInput.trim().toLowerCase() === correo) setCorreoAdminInput("");
+      notifyUser(habilitar ? `Admin concedido a ${correo}.` : `Admin retirado a ${correo}.`);
+    } catch (err) {
+      notifyUser("No se pudo actualizar el rol: " + err.message);
+    } finally {
+      setActualizandoRolAdmin(false);
+    }
+  };
+
+  const handleAsignarAdmin = async (e) => {
+    e.preventDefault();
+    await handleCambiarRolAdmin(correoAdminInput, true);
+  };
+
+  const handleEmitirOtpManual = async (e) => {
+    e.preventDefault();
+    setEmitiendoOtpManual(true);
+    try {
+      const resultado = await emitirOtpManualAdmin(correoOtpManualInput);
+      setModalOtpManual({ correo: resultado.correo, codigoOtp: resultado.codigoOtp, expiraEnMinutos: resultado.expiraEnMinutos || 10 });
+      setCorreoOtpManualInput("");
+    } catch (err) {
+      notifyUser("No se pudo emitir el OTP manual: " + err.message);
+    } finally {
+      setEmitiendoOtpManual(false);
     }
   };
 
@@ -455,10 +611,12 @@ export default function Admin() {
       const actualizadas = {
         maxJugadoresPorEquipo: parseInt(cfgMaxJugadores, 10) || 15,
         fechaCierreInscripciones: cfgFechaCierre || null,
+        mantenimientoActivo: Boolean(cfgMantenimientoActivo),
         publicarGoleadores: Boolean(cfgPublicarGoleadores),
         publicarClasificacion: Boolean(cfgPublicarClasificacion),
         publicarPremios: Boolean(cfgPublicarPremios),
-        whatsappCapitanesUrl: (urlWhatsappInput || "").trim()
+        whatsappCapitanesUrl: (urlWhatsappInput || "").trim(),
+        otpAutomaticoHabilitado: Boolean(cfgOtpAutomaticoHabilitado)
       };
       await guardarConfiguracionGeneral(actualizadas);
       setConfiguracion((prev) => ({ ...prev, ...actualizadas }));
@@ -892,7 +1050,7 @@ export default function Admin() {
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto text-center shadow-2xl" role="dialog" aria-modal="true" aria-label="Vista previa del documento">
             <div className="flex justify-between items-center mb-4 border-b pb-2">
               <h3 className="font-bold text-blue-950 text-sm truncate text-left">{visorModal.titulo}</h3>
-              <button type="button" onClick={() => setVisorModal(null)} aria-label="Cerrar vista previa" className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+              <button type="button" onClick={cerrarVisorDocumento} aria-label="Cerrar vista previa" className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
             </div>
 
             {visorModal.jugador && (
@@ -908,7 +1066,13 @@ export default function Admin() {
               </div>
             )}
 
-            {visorModal.url ? (
+            {visorModal.cargando ? (
+              <p className="text-xs text-blue-900 py-8" role="status">Cargando documento…</p>
+            ) : visorModal.error ? (
+              <p className="text-xs text-red-700 bg-red-50 py-4 px-3 rounded-xl" role="alert">{visorModal.error}</p>
+            ) : visorModal.url?.startsWith("data:application/pdf") ? (
+              <iframe src={visorModal.url} title={visorModal.titulo} className="w-full h-[55vh] rounded-xl border shadow" />
+            ) : visorModal.url ? (
               <img src={visorModal.url} alt="Doc" className="max-h-[55vh] mx-auto rounded-xl border shadow" />
             ) : (
               <p className="text-xs text-gray-400 py-8">Sin imagen adjunta.</p>
@@ -939,7 +1103,7 @@ export default function Admin() {
               )}
               <button
                 type="button"
-                onClick={() => setVisorModal(null)}
+                onClick={cerrarVisorDocumento}
                 className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold px-4 py-2 rounded-xl"
               >
                 Cerrar Visor
@@ -989,6 +1153,29 @@ export default function Admin() {
               >
                 Cerrar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalOtpManual && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-amber-100 text-center space-y-4" role="dialog" aria-modal="true" aria-label="Código OTP manual">
+            <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center text-2xl mx-auto">🔐</div>
+            <h3 className="text-xl font-black text-blue-950">Código de verificación</h3>
+            <p className="text-xs text-gray-600">Entrega este código a <strong>{modalOtpManual.correo}</strong>. Vence en {modalOtpManual.expiraEnMinutos} minutos y se invalida después de usarse.</p>
+            <div className="bg-gray-100 p-4 rounded-2xl border font-mono text-3xl font-black text-blue-950 tracking-[0.35em] select-all">{modalOtpManual.codigoOtp}</div>
+            <p className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs text-amber-900">Por seguridad, el código no se almacena en el historial y no volverá a mostrarse al cerrar esta ventana.</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(modalOtpManual.codigoOtp);
+                  notifyUser("Código copiado al portapapeles.");
+                }}
+                className="flex-1 bg-blue-950 hover:bg-blue-900 text-white font-bold py-2.5 rounded-xl text-xs"
+              >Copiar código</button>
+              <button type="button" onClick={() => setModalOtpManual(null)} className="px-5 border border-gray-300 hover:bg-gray-50 font-bold text-gray-700 py-2.5 rounded-xl text-xs">Cerrar</button>
             </div>
           </div>
         </div>
@@ -1049,7 +1236,7 @@ export default function Admin() {
             <div className="flex justify-between items-center mb-3 border-b pb-2">
               <div>
                 <h3 className="text-base font-black text-blue-950">
-                  {modalCarnetJugador.fotoDocumento || modalCarnetJugador.foto_documento
+                  {modalCarnetJugador.tieneFoto || modalCarnetJugador.fotoDocumento || modalCarnetJugador.foto_documento
                     ? "✏️ Cambiar Carnet o Matrícula"
                     : "🪪 Subir Carnet o Matrícula"}
                 </h3>
@@ -1059,10 +1246,7 @@ export default function Admin() {
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setModalCarnetJugador(null);
-                  setCarnetDataUrl(null);
-                }}
+                onClick={cerrarModalCarnet}
                 aria-label="Cerrar carga de carnet"
                 className="text-gray-400 hover:text-gray-700 font-bold text-lg"
               >
@@ -1093,16 +1277,26 @@ export default function Admin() {
                 </p>
               )}
 
+              {cargandoCarnetActual && (
+                <p className="text-xs text-blue-900 bg-blue-50 p-2.5 rounded-xl" role="status">
+                  Cargando carnet actual…
+                </p>
+              )}
+
               {carnetDataUrl && (
                 <div className="border rounded-2xl p-2 bg-gray-50 text-center">
                   <span className="text-[10px] text-gray-500 font-semibold block mb-1">
                     Vista Previa del Carnet:
                   </span>
-                  <img
-                    src={carnetDataUrl}
-                    alt="Carnet Preview"
-                    className="max-h-48 mx-auto rounded-xl border shadow-sm object-contain"
-                  />
+                  {carnetDataUrl.startsWith("data:application/pdf") ? (
+                    <iframe src={carnetDataUrl} title="Vista previa del carnet" className="w-full h-48 rounded-xl border" />
+                  ) : (
+                    <img
+                      src={carnetDataUrl}
+                      alt="Carnet Preview"
+                      className="max-h-48 mx-auto rounded-xl border shadow-sm object-contain"
+                    />
+                  )}
                 </div>
               )}
 
@@ -1110,10 +1304,7 @@ export default function Admin() {
                 <button
                   type="button"
                   disabled={subiendoCarnet}
-                  onClick={() => {
-                    setModalCarnetJugador(null);
-                    setCarnetDataUrl(null);
-                  }}
+                  onClick={cerrarModalCarnet}
                   className="w-1/3 border py-2.5 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
                 >
                   Cancelar
@@ -1683,14 +1874,14 @@ export default function Admin() {
                 type="button"
                 aria-pressed={pestanaActiva === key}
                 aria-controls="admin-panel-content"
-                onClick={() => setPestanaActiva(key)}
+                onClick={() => cambiarPestana(key)}
                 className="admin-sidebar__link"
               >
                 <Icon size={17} aria-hidden="true" />
                 <span>{label}</span>
                 {key === "equipos" && <span className="admin-nav-count">{equipos.length}</span>}
                 {key === "jugadores" && <span className="admin-nav-count">{jugadores.length}</span>}
-                {key === "usuarios" && <span className="admin-nav-count">{usuarios.length}</span>}
+                {key === "usuarios" && <span className="admin-nav-count">{cargandoUsuarios ? "…" : usuariosCargados ? usuarios.length : ""}</span>}
               </button>
             ))}
           </nav>
@@ -1701,7 +1892,7 @@ export default function Admin() {
           <select
             id="admin-mobile-area"
             value={pestanaActiva}
-            onChange={(event) => setPestanaActiva(event.target.value)}
+            onChange={(event) => cambiarPestana(event.target.value)}
           >
             {ADMIN_SECTIONS.map(({ key, label }) => (
               <option key={key} value={key}>{label}</option>
@@ -1771,9 +1962,10 @@ export default function Admin() {
                   <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end pt-2 md:pt-0 border-t md:border-t-0">
                     <button
                       type="button"
-                      onClick={() => setVisorModal({
+                      onClick={() => abrirVisorDocumento({
                         titulo: `Comprobante de Pago — ${eq.nombre}`,
-                        url: eq.comprobanteDataUrl
+                        tipoDocumento: "comprobante",
+                        registroId: eq.id
                       })}
                       className="border border-blue-900 text-blue-900 hover:bg-blue-50 text-xs font-bold px-3 py-1.5 rounded-xl transition"
                     >
@@ -1909,7 +2101,7 @@ export default function Admin() {
                               <td className="p-3 font-mono text-gray-800 text-xs font-semibold">{j.dni || "N/A"}</td>
                               <td className="p-3">
                                 {(() => {
-                                  const tieneFoto = Boolean(j.fotoDocumento || j.foto_documento);
+                                  const tieneFoto = Boolean(j.tieneFoto || j.fotoDocumento || j.foto_documento);
                                   const estadoCarnet = obtenerEstadoCarnet(j);
                                   const esDocente = estadoCarnet === "exento_docente" || esDocenteAutorizado(j.correo);
 
@@ -1947,9 +2139,10 @@ export default function Admin() {
                                           <button
                                             type="button"
                                             onClick={() =>
-                                              setVisorModal({
+                                              abrirVisorDocumento({
                                                 titulo: `Carnet de ${j.nombre} — ${eq.nombre}`,
-                                                url: j.fotoDocumento || j.foto_documento,
+                                                tipoDocumento: "carnet",
+                                                registroId: j.id,
                                                 jugador: j
                                               })
                                             }
@@ -2039,7 +2232,7 @@ export default function Admin() {
                         <td className="p-3 font-mono text-gray-800 text-xs font-semibold">{j.dni || "N/A"}</td>
                         <td className="p-3">
                           {(() => {
-                            const tieneFoto = Boolean(j.fotoDocumento || j.foto_documento);
+                            const tieneFoto = Boolean(j.tieneFoto || j.fotoDocumento || j.foto_documento);
                             const estadoCarnet = obtenerEstadoCarnet(j);
                             const esDocente = estadoCarnet === "exento_docente" || esDocenteAutorizado(j.correo);
 
@@ -2077,9 +2270,10 @@ export default function Admin() {
                                     <button
                                       type="button"
                                       onClick={() =>
-                                        setVisorModal({
+                                        abrirVisorDocumento({
                                           titulo: `Carnet de ${j.nombre} — ${j.nombreEquipo || ""}`,
-                                          url: j.fotoDocumento || j.foto_documento,
+                                          tipoDocumento: "carnet",
+                                          registroId: j.id,
                                           jugador: j
                                         })
                                       }
@@ -2447,6 +2641,58 @@ export default function Admin() {
             <h2>Usuarios y seguridad</h2>
             <p>Administra accesos y consulta alertas de cambios de identidad.</p>
           </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {sesionActual?.esAdminPrincipal && (
+              <section className="bg-white p-5 rounded-2xl border border-purple-200 shadow-sm space-y-3">
+                <div>
+                  <h3 className="text-sm font-black text-purple-950">Administradores delegados</h3>
+                  <p className="text-xs text-gray-600 mt-1">Solo los admins principales pueden conceder o retirar este rol. El correo debe ser institucional.</p>
+                </div>
+                <form onSubmit={handleAsignarAdmin} className="flex flex-col sm:flex-row gap-2">
+                  <label htmlFor="admin-role-email" className="sr-only">Correo institucional para agregar como administrador</label>
+                  <input
+                    id="admin-role-email"
+                    type="email"
+                    required
+                    value={correoAdminInput}
+                    onChange={(e) => setCorreoAdminInput(e.target.value)}
+                    placeholder="nombre@unitec.edu.hn"
+                    className="flex-1 border border-gray-300 px-3 py-2 rounded-xl text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <button type="submit" disabled={actualizandoRolAdmin} className="bg-purple-800 hover:bg-purple-900 text-white disabled:opacity-50 font-bold px-4 py-2 rounded-xl text-xs">
+                      {actualizandoRolAdmin ? "Actualizando…" : "Agregar admin"}
+                    </button>
+                    <button type="button" disabled={actualizandoRolAdmin || !correoAdminInput.trim()} onClick={() => handleCambiarRolAdmin(correoAdminInput, false)} className="border border-red-200 bg-red-50 hover:bg-red-100 text-red-800 disabled:opacity-50 font-bold px-4 py-2 rounded-xl text-xs">
+                      Retirar
+                    </button>
+                  </div>
+                </form>
+              </section>
+            )}
+
+            <section className="bg-white p-5 rounded-2xl border border-amber-200 shadow-sm space-y-3">
+              <div>
+                <h3 className="text-sm font-black text-blue-950">Entrega manual de código OTP</h3>
+                <p className="text-xs text-gray-600 mt-1">Úsalo si falla el correo. El código vence en 10 minutos y solo se muestra una vez; la verificación sigue activa.</p>
+              </div>
+              <form onSubmit={handleEmitirOtpManual} className="flex flex-col sm:flex-row gap-2">
+                <label htmlFor="admin-manual-otp-email" className="sr-only">Correo institucional del usuario</label>
+                <input
+                  id="admin-manual-otp-email"
+                  type="email"
+                  required
+                  value={correoOtpManualInput}
+                  onChange={(e) => setCorreoOtpManualInput(e.target.value)}
+                  placeholder="usuario@unitec.edu.hn"
+                  className="flex-1 border border-gray-300 px-3 py-2 rounded-xl text-sm"
+                />
+                <button type="submit" disabled={emitiendoOtpManual} className="bg-amber-700 hover:bg-amber-800 text-white disabled:opacity-50 font-bold px-4 py-2 rounded-xl text-xs">
+                  {emitiendoOtpManual ? "Generando…" : "Generar código"}
+                </button>
+              </form>
+            </section>
+          </div>
           <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-200 shadow-sm space-y-4">
             <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-4">
               <div>
@@ -2454,7 +2700,7 @@ export default function Admin() {
                   <span>👥</span> Gestión de Cuentas y Accesos
                 </h3>
                 <p className="text-xs text-gray-500">
-                  Total de usuarios registrados: {usuarios.length}. Genera contraseñas temporales y audita cambios de identidad.
+                  {cargandoUsuarios ? "Cargando usuarios…" : `Total de usuarios registrados: ${usuarios.length}. Genera contraseñas temporales y audita cambios de identidad.`}
                 </p>
               </div>
             </div>
@@ -2474,6 +2720,12 @@ export default function Admin() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
+                  {cargandoUsuarios && (
+                    <tr><td colSpan={8} className="p-6 text-center text-blue-900">Cargando usuarios…</td></tr>
+                  )}
+                  {usuariosCargados && !cargandoUsuarios && usuarios.length === 0 && (
+                    <tr><td colSpan={8} className="p-6 text-center text-gray-500">No hay usuarios registrados.</td></tr>
+                  )}
                   {usuarios.map((u, idx) => {
                     const cambiosUsuario = historial.filter(
                       (h) =>
@@ -2493,14 +2745,16 @@ export default function Admin() {
                         <td className="p-3">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              u.rol === "admin"
+                              u.rol === "admin_principal"
+                                ? "bg-purple-900 text-white border border-purple-950"
+                                : u.rol === "admin"
                                 ? "bg-purple-100 text-purple-900 border border-purple-200"
                                 : u.rol === "docente"
                                 ? "bg-emerald-100 text-emerald-900 border border-emerald-200"
                                 : "bg-blue-50 text-blue-900 border border-blue-200"
                             }`}
                           >
-                            {u.rol || "jugador"}
+                            {u.rol === "admin_principal" ? "admin principal" : (u.rol || "jugador")}
                           </span>
                         </td>
                         <td className="p-3 font-mono text-gray-600 text-[11px]">
@@ -2532,16 +2786,29 @@ export default function Admin() {
                           )}
                         </td>
                         <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            disabled={generandoTempPassword}
-                            onClick={() => handleGenerarPasswordTemporal(u)}
-                            className="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-2.5 py-1 rounded-xl text-xs font-bold transition inline-flex items-center gap-1 shadow-sm disabled:opacity-50"
-                            title="Generar contraseña temporal"
-                          >
-                            <span>🔑</span>
-                            <span>Temp Password</span>
-                          </button>
+                          <div className="flex flex-wrap justify-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={generandoTempPassword}
+                              onClick={() => handleGenerarPasswordTemporal(u)}
+                              className="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-2.5 py-1 rounded-xl text-xs font-bold transition inline-flex items-center gap-1 shadow-sm disabled:opacity-50"
+                              title="Generar contraseña temporal"
+                            >
+                              <span>🔑</span>
+                              <span>Temp Password</span>
+                            </button>
+                            {sesionActual?.esAdminPrincipal && !u.esAdminPrincipal && (
+                              <button
+                                type="button"
+                                disabled={actualizandoRolAdmin}
+                                onClick={() => handleCambiarRolAdmin(u.correo, !u.esAdmin)}
+                                className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition disabled:opacity-50 ${u.esAdmin ? "bg-red-50 text-red-800 border-red-200 hover:bg-red-100" : "bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100"}`}
+                                title={u.esAdmin ? "Retirar rol de administrador" : "Conceder rol de administrador"}
+                              >
+                                {u.esAdmin ? "Retirar admin" : "Hacer admin"}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2680,15 +2947,51 @@ export default function Admin() {
                     Fecha Límite de Inscripciones
                   </label>
                   <p className="text-[11px] text-gray-500">
-                    A partir de esta fecha, el sistema cerrará automáticamente las inscripciones.
+                    El cierre usa la hora de Tegucigalpa. Selecciona el día y la hora exacta.
                   </p>
                   <input
                     id="config-registration-deadline"
-                    type="date"
+                    type="datetime-local"
                     value={cfgFechaCierre}
                     onChange={(e) => setCfgFechaCierre(e.target.value)}
                     className="border border-gray-300 p-2.5 rounded-xl text-xs font-bold bg-white"
                   />
+                </div>
+
+                <div className="p-4 bg-red-50 rounded-2xl border border-red-200 space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-bold text-red-950 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cfgMantenimientoActivo}
+                      onChange={(e) => setCfgMantenimientoActivo(e.target.checked)}
+                      className="w-4 h-4 rounded text-red-800 focus:ring-red-700"
+                    />
+                    Modo mantenimiento: bloquear el sitio para no administradores
+                  </label>
+                  <p className="text-[11px] text-red-800">
+                    Los usuarios verán un aviso de mantenimiento. Los administradores conservarán acceso.
+                  </p>
+                  <span className={`text-[10px] font-bold ${cfgMantenimientoActivo ? "text-red-800" : "text-emerald-700"}`}>
+                    {cfgMantenimientoActivo ? "Mantenimiento activo" : "Sitio disponible"}
+                  </span>
+                </div>
+
+                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-bold text-gray-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cfgOtpAutomaticoHabilitado}
+                      onChange={(e) => setCfgOtpAutomaticoHabilitado(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-800 focus:ring-amber-700"
+                    />
+                    Envío automático de códigos OTP por correo
+                  </label>
+                  <p className="text-[11px] text-gray-600">
+                    Al desactivarlo, se detienen las solicitudes automáticas. La verificación permanece activa y el admin puede emitir códigos manualmente desde Usuarios y seguridad.
+                  </p>
+                  <span className={`text-[10px] font-bold ${cfgOtpAutomaticoHabilitado ? "text-emerald-700" : "text-amber-800"}`}>
+                    {cfgOtpAutomaticoHabilitado ? "Habilitado" : "Deshabilitado"}
+                  </span>
                 </div>
 
               </div>
